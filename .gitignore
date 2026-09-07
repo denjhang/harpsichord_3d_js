@@ -1,0 +1,9 @@
+# 系统垃圾
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 备份/临时
+*.FCBak
+*.tmp
+~$*

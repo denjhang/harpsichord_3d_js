@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>里拉竖琴 3D · Lyre Simulator</title>
+<style>
+  html,body{margin:0;height:100%;background:#151210;overflow:hidden;font-family:Georgia,serif;user-select:none;touch-action:none}
+  #c3d{position:fixed;inset:0;display:block;cursor:grab}
+  #c3d.dragging{cursor:grabbing}
+  #hud{position:fixed;top:16px;left:20px;color:#c9b896;opacity:.8;font-size:13px;line-height:1.8;pointer-events:none}
+  #hud b{color:#ead9ac;font-size:16px;letter-spacing:2px}
+  #cube{position:fixed;top:16px;right:16px;width:110px;height:110px;cursor:pointer}
+  #tips{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#86775d;font-size:12.5px;pointer-events:none}
+  #tips span{color:#b3a27d}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+</head>
+<body>
+<canvas id="c3d"></canvas>
+<div id="hud"><b>里拉竖琴 · 7 弦</b><br>调弦：C4 D4 E4 G4 A4 C5 D5<br>Karplus-Strong 声学合成</div>
+<canvas id="cube" width="220" height="220" style="width:110px;height:110px"></canvas>
+<div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 扫弦/点弦弹奏 · 键盘 <span>A S D F G H J / 1-7</span> · 右上角立方体=<span>快速视角</span></div>
+<script type="module">
+import * as THREE from "three";
+import { Line2 } from "three/addons/lines/Line2.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+
+/* ============ 音频：Karplus-Strong 拨弦物理合成 ============ */
+let AC=null, master=null;
+function initAudio(){
+  if(AC) return;
+  AC=new (window.AudioContext||window.webkitAudioContext)();
+  master=AC.createGain(); master.gain.value=0.9;
+  const lp=AC.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=5200; lp.Q.value=.6; // 木箱体
+  const hs=AC.createBiquadFilter(); hs.type="highshelf"; hs.frequency.value=1800; hs.gain.value=-6;
+  master.connect(lp); lp.connect(hs); hs.connect(AC.destination);
+}
+function synthPluck(freq, vel){                       // Karplus-Strong
+  initAudio(); if(AC.state==="suspended")AC.resume();
+  const sr=AC.sampleRate, N=Math.max(2,Math.round(sr/freq));
+  const dur=Math.min(3.2,1.6+220/freq);
+  const buf=AC.createBuffer(1,Math.ceil(sr*dur),sr), d=buf.getChannelData(0);
+  const ring=new Float32Array(N);
+  for(let i=0;i<N;i++) ring[i]=(Math.random()*2-1)*.9;
+  let last=0; const damp=.5+.493*Math.exp(-freq/1800);
+  for(let i=0;i<d.length;i++){
+    const j=i%N, cur=ring[j];
+    d[i]=cur; ring[j]=damp*(cur+ring[(j+1)%N])/2+last*.02; last=cur;
+  }
+  for(let i=0;i<Math.floor(N/5)&&i<d.length;i++) d[i]*=i/Math.floor(N/5); // 1/5 拨弦点谐波
+  const src=AC.createBufferSource(); src.buffer=buf;
+  const g=AC.createGain(); g.gain.value=.32*vel;
+  src.connect(g); g.connect(master); src.start();
+}
+
+/* ============ 场景 ============ */
+const canvas=document.getElementById("c3d");
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x17130f);
+scene.fog=new THREE.Fog(0x17130f,90,220);
+const camera=new THREE.PerspectiveCamera(42,1,.1,500);
+
+{ // 灯光
+  scene.add(new THREE.AmbientLight(0xffe8c0,.55));
+  const key=new THREE.DirectionalLight(0xfff1d6,1.5); key.position.set(18,30,35); scene.add(key);
+  const rim=new THREE.DirectionalLight(0xd0b090,.6); rim.position.set(-25,10,-20); scene.add(rim);
+  const bounce=new THREE.DirectionalLight(0x806040,.35); bounce.position.set(0,-30,10); scene.add(bounce);
+}
+
+/* ---- 琴体轮廓（单位 cm，参考实物：全长32.5 厚2.8 顶部闭合）---- */
+const NOTES=[261.63,293.66,329.63,392.00,440.00,523.25,587.33];
+const KEYMAP={a:0,s:1,d:2,f:3,g:4,h:5,j:6,"1":0,"2":1,"3":2,"4":3,"5":4,"6":5,"7":6};
+const GAP=1.55, X0=-(NOTES.length-1)/2*GAP;
+const H=32.5, TH=2.8;
+const shape=new THREE.Shape();
+shape.moveTo(0,.6);
+shape.bezierCurveTo( 3.2,.6, 6.4,1.6, 8.2,3.6);      // 底部右弧
+shape.bezierCurveTo(10.6,6.4, 10.9,10.8, 8.9,14.2);  // 右下鼓肚
+shape.bezierCurveTo(7.6,16.4, 6.3,17.6, 6.1,19.6);   // 右腰
+shape.bezierCurveTo(5.9,22.4, 7.3,24.4, 7.8,27.0);   // 右上鼓
+shape.bezierCurveTo(8.2,29.6, 7.4,31.2, 5.4,31.9);   // 右肩
+shape.bezierCurveTo(3.6,32.5, -3.6,32.5, -5.4,31.9); // 顶部闭合横梁
+shape.bezierCurveTo(-7.4,31.2, -8.2,29.6, -7.8,27.0);// 左肩
+shape.bezierCurveTo(-7.3,24.4, -5.9,22.4, -6.1,19.6);// 左上鼓
+shape.bezierCurveTo(-6.3,17.6, -7.6,16.4, -8.9,14.2);// 左腰
+shape.bezierCurveTo(-10.9,10.8, -10.6,6.4, -8.2,3.6);// 左下鼓肚
+shape.bezierCurveTo(-6.4,1.6, -3.2,.6, 0,.6);
+shape.closePath();
+// 弦窗（大椭圆镂空，顶部保留闭合横梁）
+const win=new THREE.Path();
+win.absellipse(0,22.6, 4.6,6.4, 0,Math.PI*2,true);
+shape.holes.push(win);
+// 圆音孔
+const sndHole=new THREE.Path();
+sndHole.absellipse(0,8.6, 2.5,2.5, 0,Math.PI*2,true);
+shape.holes.push(sndHole);
+// 下端 7 个穿弦孔（弦穿过板到背面固定）
+for(let i=0;i<7;i++){
+  const hp=new THREE.Path();
+  hp.absellipse(X0+i*GAP,2.5,.3,.3,0,Math.PI*2,true);
+  shape.holes.push(hp);
+}
+
+/* 木纹贴图（程序生成） */
+function woodTexture(base="#e8cfa0",dark="#b98f58"){
+  const c=document.createElement("canvas"); c.width=512;c.height=1024;
+  const g=c.getContext("2d");
+  g.fillStyle=base; g.fillRect(0,0,512,1024);
+  for(let i=0;i<90;i++){                                // 纵向木纹
+    g.strokeStyle=`rgba(120,80,30,${.04+Math.random()*.08})`;
+    g.lineWidth=.6+Math.random()*2.2;
+    const x=Math.random()*512;
+    g.beginPath(); g.moveTo(x,0);
+    for(let y=0;y<=1024;y+=64) g.lineTo(x+Math.sin(y*.01+i)*9+(Math.random()-.5)*6,y);
+    g.stroke();
+  }
+  for(let i=0;i<14;i++){                                // 淡色年轮晕
+    g.fillStyle=`rgba(255,240,200,${.03+Math.random()*.04})`;
+    g.beginPath(); g.ellipse(Math.random()*512,Math.random()*1024,30+Math.random()*70,80+Math.random()*160,0,0,7); g.fill();
+  }
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+const bodyMat=new THREE.MeshStandardMaterial({map:woodTexture(),roughness:.72,metalness:.02});
+const body=new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:TH,bevelEnabled:true,bevelThickness:.22,bevelSize:.22,bevelSegments:3,curveSegments:48}),bodyMat);
+body.geometry.center();                                // 居中，方便绕琴体旋转
+const BODY=new THREE.Group(); BODY.add(body); scene.add(BODY);
+// 坐标换算：轮廓 y(0..32.5) → 世界 y(-16.25..16.25)；厚 2.8 → z ±1.4
+const cm=v=>v-H/2;
+
+/* ---- 弦 ---- */
+const STR_TOP=31.0;                                    // 弦上端：缠绕在音柱上
+const STR_BOT=4.0;                                     // 弦振动段下端：架在品条上
+const STR_Z=TH/2+1.05;                                 // 弦平面悬空于面板前 1.05cm
+const strings=[];
+const SEG=36, TAIL=4;                                  // 振动段 + 穿板尾段
+const PEG_Y=31.3;                                      // 音柱中心（轮廓坐标）
+const THICK=[.16,.14,.12,.105,.09,.075,.06];           // 弦径(cm)：低粗高细，明显区分
+for(let i=0;i<7;i++){
+  const geo=new LineGeometry();
+  const mat=new LineMaterial({color:0xf2efe6,worldUnits:true,linewidth:THICK[i]});
+  const line=new Line2(geo,mat);
+  const x=X0+i*GAP;
+  const grp=new THREE.Group(); grp.position.x=x; grp.add(line);
+  BODY.add(grp);
+  // 视觉驻波衰减时间常数：低音弦振得久、高音弦收得快（与音频延音一致）
+  strings.push({grp,line,x,note:NOTES[i],amp:0,phase:0,lastPluck:-1e9,freq:NOTES[i],
+                ring:1.2+1.2*Math.exp(-(NOTES[i]-261)/230)});
+}
+// 背面固定环（铁扣）：弦穿过板后在背面锁住，有体积感
+const ringMat=new THREE.MeshStandardMaterial({color:0xc8c8d2,roughness:.3,metalness:.95});
+const RING_Z=-TH/2-.55;
+for(let i=0;i<7;i++){
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(.55,.16,12,24),ringMat);
+  ring.position.set(X0+i*GAP,cm(2.5),RING_Z); BODY.add(ring);
+  const knot=new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),ringMat); // 弦端结扣
+  knot.position.set(X0+i*GAP,cm(2.5),RING_Z-.2); BODY.add(knot);
+}
+// 下端品条：唯一的木条，立起支撑琴弦（弦锚点在背面穿孔+铁扣）
+const nutMat=new THREE.MeshStandardMaterial({color:0x7a5a30,roughness:.6});
+const bridge=new THREE.Mesh(new THREE.BoxGeometry(GAP*6+1.8,1.2,1.0),nutMat);
+bridge.position.set(0,cm(4.1),TH/2+.35); BODY.add(bridge);   // 顶面托住弦
+// 上端音柱（无横木）：金属柱体从横梁前表面伸出，弦缠绕其上
+const pegMat=new THREE.MeshStandardMaterial({color:0xd8d8de,roughness:.25,metalness:.9});
+const pegs=[];
+for(let i=0;i<7;i++){
+  const grp=new THREE.Group();
+  const peg=new THREE.Mesh(new THREE.CylinderGeometry(.3,.3,1.3,14),pegMat);
+  peg.rotation.x=Math.PI/2; grp.add(peg);
+  const cap=new THREE.Mesh(new THREE.CylinderGeometry(.36,.36,.18,14),pegMat);
+  cap.rotation.x=Math.PI/2; cap.position.z=.75; grp.add(cap);   // 柱头防脱
+  grp.position.set(X0+i*GAP,cm(PEG_Y),TH/2+.55);
+  BODY.add(grp);
+  pegs.push(grp);
+}
+
+/* ============ 自由视角（操作对齐 FreeCAD）============ */
+const target=new THREE.Vector3(0,0,0);
+let yaw=.0, pitch=0, dist=62;
+function applyCam(){
+  pitch=Math.max(-1.45,Math.min(1.45,pitch));
+  camera.position.set(
+    target.x+dist*Math.cos(pitch)*Math.sin(yaw),
+    target.y+dist*Math.sin(pitch),
+    target.z+dist*Math.cos(pitch)*Math.cos(yaw));
+  camera.lookAt(target);
+}
+let mode=null,px=0,py=0;
+canvas.addEventListener("pointerdown",e=>{
+  mode=e.shiftKey?"pan":"rot"; px=e.clientX; py=e.clientY;
+  canvas.classList.add("dragging"); canvas.setPointerCapture(e.pointerId);
+  if(!e.shiftKey) tryPluckRay(e);
+});
+canvas.addEventListener("pointermove",e=>{
+  const dx=e.clientX-px, dy=e.clientY-py;
+  if(mode==="rot"){ yaw-=dx*.006; pitch+=dy*.006; applyCam(); }
+  else if(mode==="pan"){
+    const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+    const up=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    target.addScaledVector(right,-dx*dist*.0011).addScaledVector(up,dy*dist*.0011);
+    applyCam();
+  } else if(mode==="pluck"){ sweepPluck(e.clientX,e.clientY); }
+  px=e.clientX; py=e.clientY;
+});
+window.addEventListener("pointerup",()=>{mode=null;canvas.classList.remove("dragging");});
+canvas.addEventListener("wheel",e=>{e.preventDefault();dist*=Math.pow(1.0011,e.deltaY);dist=Math.max(15,Math.min(160,dist));applyCam();},{passive:false});
+
+/* ---- 拨弦：射线拾取 ---- */
+const ray=new THREE.Raycaster(), ndc=new THREE.Vector2();
+function toNDC(x,y){const r=canvas.getBoundingClientRect();ndc.set((x-r.left)/r.width*2-1,-((y-r.top)/r.height)*2+1);}
+function pluckSt(st,vel=1){
+  const now=performance.now();
+  if(now-st.lastPluck<60)return;
+  st.lastPluck=now; st.phase=Math.random()*6.28; st.freq=st.note;
+  st.amp=.06; synthPluck(st.freq,vel);
+}
+function tryPluckRay(e){
+  toNDC(e.clientX,e.clientY); ray.setFromCamera(ndc,camera);
+  const hit=ray.intersectObjects(strings.map(s=>s.line),false)[0];
+  if(hit){const st=strings.find(s=>s.line===hit.object); if(st)pluckSt(st);}
+}
+function sweepPluck(x,y){                               // 扫弦：屏幕 x 跨过的弦全拨
+  toNDC(x,y); ray.setFromCamera(ndc,camera);
+  const plane=new THREE.Plane(new THREE.Vector3(0,0,1),-STR_Z);       // 弦所在平面
+  const p=new THREE.Vector3();
+  if(ray.ray.intersectPlane(plane,p)){
+    const lx=BODY.worldToLocal(p.clone()).x;
+    for(const st of strings) if(Math.abs(lx-st.x)<GAP*.55) pluckSt(st,.9);
+  }
+}
+window.addEventListener("keydown",e=>{
+  const i=KEYMAP[e.key.toLowerCase()];
+  if(i!==undefined) pluckSt(strings[i]);
+});
+
+/* ============ 视角立方体（右上角，类 FreeCAD 导航立方体）============ */
+const cubeCv=document.getElementById("cube"), cg=cubeCv.getContext("2d");
+const FACES=[
+  {n:[0,0,1], l:"前"},{n:[0,0,-1],l:"后"},{n:[1,0,0],l:"右"},
+  {n:[-1,0,0],l:"左"},{n:[0,1,0],l:"上"},{n:[0,-1,0],l:"下"},
+];
+function drawCube(){
+  const S=220, c=S/2, R=62;
+  cg.clearRect(0,0,S,S);
+  cg.fillStyle="rgba(30,24,18,.55)"; cg.beginPath(); cg.arc(c,c,R+38,0,7); cg.fill();
+  cg.strokeStyle="rgba(200,170,110,.25)"; cg.stroke();
+  // 旋转矩阵（与主视图一致）
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const rot=v=>{
+    let x=v[0]*cy+v[2]*sy, z=-v[0]*sy+v[2]*cy, y=v[1];
+    let y2=y*cp-z*sp, z2=y*sp+z*cp;
+    return [x,y2,z2];
+  };
+  // 立方体 8 顶点
+  const V=[];
+  for(const X of[-1,1])for(const Y of[-1,1])for(const Z of[-1,1])V.push({p:[X,Y,Z],r:rot([X,Y,Z])});
+  V.sort((a,b)=>a.r[2]-b.r[2]);
+  const proj=r=>[c+r[0]*R,c-r[1]*R];
+  // 面近似：画 3 个可见面
+  const axes=[rot([1,0,0]),rot([0,1,0]),rot([0,0,1])];
+  const faceDefs=[
+    {n:[0,0,1],a:axes[0],b:axes[1],col:"#8a6f4a",l:"前"},
+    {n:[1,0,0],a:axes[2],b:axes[1],col:"#6f5a3c",l:"右"},
+    {n:[0,1,0],a:axes[0],b:axes[2],col:"#a08050",l:"上"},
+  ];
+  for(const f of faceDefs){
+    const nrm=rot(f.n);
+    if(nrm[2]<=0.02) continue;
+    const ctr=[c+nrm[0]*R*.55, c-nrm[1]*R*.55];
+    const ha=R*.48, hb=R*.48;
+    cg.beginPath();
+    const p1=[ctr[0]+f.a[0]*ha,ctr[1]-f.a[1]*ha], p2=[p1[0]+f.b[0]*hb,p1[1]-f.b[1]*hb], p3=[ctr[0]+f.b[0]*hb,ctr[1]-f.b[1]*hb];
+    cg.moveTo(...p1);cg.lineTo(...p2);cg.lineTo(...p3);cg.lineTo(...ctr);cg.closePath();
+    cg.fillStyle=f.col; cg.globalAlpha=.9; cg.fill(); cg.globalAlpha=1;
+    cg.strokeStyle="#2a2015"; cg.stroke();
+    cg.fillStyle="#f0e2c0"; cg.font="16px Georgia";
+    cg.textAlign="center";cg.textBaseline="middle";
+    const [tx,ty]=proj(nrm.map((v,i)=>v*1.35));
+    cg.fillText(f.l,tx,ty);
+  }
+  for(const v of V){cg.fillStyle="#d8c49a";cg.beginPath();cg.arc(...proj(v.r),2.5,0,7);cg.fill();}
+}
+cubeCv.addEventListener("click",e=>{
+  const r=cubeCv.getBoundingClientRect();
+  const mx=(e.clientX-r.left)*2, my=(e.clientY-r.top)*2;
+  const cx=110,cy=110;
+  const dx=mx-cx,dy=cy-my;
+  if(Math.hypot(dx,dy)>95) return;
+  // 按点击方位选视角（八方位 + 中心=轴测）
+  let ty,tp;
+  if(Math.hypot(dx,dy)<32){ ty=.7; tp=.5; }                          // 中心：轴测
+  else if(Math.abs(dy)>Math.abs(dx)){ ty=0; tp=dy>0?Math.PI/2:-Math.PI/2; }  // 上/下
+  else { tp=0; ty=dx>0?-Math.PI/2:Math.PI/2; }                       // 左/右
+  animCam(ty,tp);
+});
+let camAnim=null;
+function animCam(ty,tp){
+  const s={yaw,pitch,dist};
+  const dYaw=((ty-s.yaw+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
+  camAnim={t0:performance.now(),dur:450,s,dYaw,tp:tp-s.pitch};
+}
+function stepCube(t){
+  if(camAnim){
+    const k=Math.min(1,(t-camAnim.t0)/camAnim.dur), e=1-Math.pow(1-k,3);
+    yaw=camAnim.s.yaw+camAnim.dYaw*e; pitch=camAnim.s.pitch+camAnim.tp*e;
+    if(k>=1)camAnim=null;
+    applyCam();
+  }
+  drawCube();
+}
+
+/* ============ 主循环 ============ */
+function resize(){
+  renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  for(const st of strings) st.line.material.resolution.set(innerWidth,innerHeight);
+}
+addEventListener("resize",resize); resize(); applyCam();
+function frame(t){
+  for(const st of strings){                              // 弦振动：两端固定的驻波
+    const arr=new Float32Array((SEG+TAIL)*3);
+    const dt=(t-st.lastPluck)/1000;
+    const yTop=cm(STR_TOP), yBot=cm(STR_BOT);
+    const decay=st.ring;                                 // 延音时间常数(秒)
+    for(let i=0;i<SEG;i++){
+      const f=i/(SEG-1), yy=yTop+(yBot-yTop)*f;
+      // 一次模（主音）+ 二次/三次模（拨弦瞬间更明显，衰减更快）
+      const m1=Math.exp(-dt*2.6), m2=Math.exp(-dt*7), m3=Math.exp(-dt*12);
+      const off=st.amp*10*(
+        Math.sin(Math.PI*f)*Math.sin(t*.02*st.note/261+st.phase)*m1+
+        .45*Math.sin(2*Math.PI*f)*Math.sin(t*.04*st.note/261+st.phase*1.3)*m2+
+        .25*Math.sin(3*Math.PI*f)*Math.sin(t*.06*st.note/261+st.phase*1.7)*m3);
+      arr[i*3]=off; arr[i*3+1]=yy; arr[i*3+2]=STR_Z;
+    }
+    // 固定尾段：品条顶 → 面板穿孔 → 背面铁扣（不振动）
+    const tailPts=[[yBot,STR_Z],[cm(3.1),TH/2+.45],[cm(2.5),TH/2+.05],[cm(2.5),RING_Z-.15]];
+    let k=SEG;
+    for(const [yy,zz] of tailPts){arr[k*3]=0;arr[k*3+1]=yy;arr[k*3+2]=zz;k++;}
+    st.line.geometry.setPositions(arr);
+  }
+  stepCube(t);
+  renderer.render(scene,camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
