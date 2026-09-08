@@ -15,6 +15,17 @@
   #bar{position:fixed;bottom:40px;right:14px;display:flex;gap:8px}
   button{padding:8px 16px;font-size:14px;cursor:pointer}
   #err{position:fixed;top:160px;left:20px;right:160px;color:#b03030;font-size:12px;white-space:pre-wrap;pointer-events:none}
+  #panel{position:fixed;left:20px;bottom:44px;width:460px;background:rgba(250,250,250,.88);
+    border:1px solid rgba(90,85,78,.35);border-radius:10px;padding:10px 12px;backdrop-filter:blur(4px)}
+  #panel.collapsed #pbody{display:none}
+  #ptitle{color:#4a453e;font-size:13px;cursor:pointer;user-select:none;margin-bottom:6px}
+  #ptitle b{letter-spacing:1px}
+  #ptitle .dirty{color:#b07020}
+  #ptext{width:100%;box-sizing:border-box;height:190px;resize:vertical;font:12px/1.5 Consolas,monospace;
+    color:#3a362f;background:#f6f4ef;border:1px solid rgba(90,85,78,.3);border-radius:6px;padding:6px}
+  #pbtns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  #pbtns button{padding:5px 12px;font-size:12.5px;background:#efece5;border:1px solid #a89f90;border-radius:6px;color:#4a453e}
+  #pbtns button:hover{background:#e5e0d4}
 </style>
 <script type="importmap">
 {"imports":{"three":"../lab/node_modules/three/build/three.module.js",
@@ -28,10 +39,22 @@
 <div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 右上角立方体=<span>快速视角</span></div>
 <canvas id="cube" width="264" height="264" style="width:132px;height:132px"></canvas>
 <div id="bar"><button id="rebuild">重建</button><button id="stl">导出 STL</button></div>
+<div id="panel">
+  <div id="ptitle"><b>模型 JSON</b> <span id="psrc"></span> <span class="dirty" id="pdirty"></span></div>
+  <div id="pbody">
+    <textarea id="ptext" spellcheck="false"></textarea>
+    <div id="pbtns">
+      <button id="apply">应用重建</button>
+      <button id="importFile">导入文件…</button>
+      <button id="saveModel">保存到模型文件</button>
+      <button id="exportCopy">导出副本</button>
+      <input type="file" id="filein" accept=".json,application/json" hidden>
+    </div>
+  </div>
+</div>
 <script type="module">
 import * as THREE from "three";
 import { STLExporter } from "three/addons/exporters/STLExporter.js";
-import Module from "manifold-3d";
 
 /* ================= 场景（z-up，单位 mm）================= */
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe1e4);
@@ -329,50 +352,22 @@ function stepCube(t){
   drawCube();
 }
 
-/* ================= 里拉建模（Manifold，无布尔）================= */
-let current=null;
+/* ================= 里拉建模（几何内核 = src/lyre.build.mjs，页面只管输入输出）================= */
+import { buildBody, validateModel } from "./src/lyre.build.mjs";
+let current=null, modelText=null;                        // modelText：当前生效的模型 JSON 文本（单一数据源）
 async function build(){
-  const wasm = await Module(); wasm.setup?.();
-  const { Manifold, CrossSection, setMinCircularAngle } = wasm;
-  setMinCircularAngle(6);
-  const model = await (await fetch("./lyre.model.json")).json();
-  const p = model.params;
-  const K = p.height/32.5;
-  const X = v => v*K, Y = v => (v-16.25)*K;
-  const bez=(p0,p1,p2,p3,t)=>{const u=1-t;return [
-    u*u*u*p0[0]+3*u*u*t*p1[0]+3*u*t*t*p2[0]+t*t*t*p3[0],
-    u*u*u*p0[1]+3*u*u*t*p1[1]+3*u*t*t*p2[1]+t*t*t*p3[1]];};
-  const pts=[]; let cur=[0,.6];
-  for(const s of model.outline.bezierSegs){
-    const p0=cur,p1=[s[0],s[1]],p2=[s[2],s[3]],p3=[s[4],s[5]];
-    for(let i=1;i<=24;i++){const [x,y]=bez(p0,p1,p2,p3,i/24); pts.push([X(x),Y(y)]);}
-    cur=p3;
-  }
-  const win=[];
-  for(let i=p.window.SAMPLE;i>=0;i--){
-    const t=(i/p.window.SAMPLE)*Math.PI*2;
-    win.push([p.window.cx+p.window.rx*Math.cos(t), p.window.cy+p.window.ry*Math.sin(t)]);
-  }
-  const outer=new CrossSection([pts,win],"NonZero");
-  let body=outer.extrude(p.thickness);
-  const inner=outer.offset(-p.wall,"Round").extrude(p.thickness-2*p.wall).translate([0,0,p.wall]);
-  body=body.subtract(inner);
-  const holes=[Manifold.cylinder(p.thickness+2,p.soundHole.r,p.soundHole.r).translate([0,p.soundHole.cy,-1])];
-  for(let i=0;i<p.stringHoles.n;i++)
-    holes.push(Manifold.cylinder(p.thickness+2,p.stringHoles.r,p.stringHoles.r)
-      .translate([(i-(p.stringHoles.n-1)/2)*p.stringHoles.gap,p.stringHoles.cy,-1]));
-  for(const h of holes) body=body.subtract(h);
-  body=body.add(Manifold.cube([p.bridge.w,p.bridge.d,p.bridge.h],true)
-    .translate([0,p.bridge.y,p.thickness+p.bridge.h/2]));
+  const model=JSON.parse(modelText);
+  const errs=validateModel(model);
+  if(errs.length) throw new Error("模型校验失败：\n· "+errs.join("\n· "));
+  const {mesh,info}=await buildBody(model);
   if(current){scene.remove(current);current.geometry.dispose();}
-  const mesh=body.getMesh();
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(new Float32Array(mesh.vertProperties),3));
   g.setIndex(Array.from(mesh.triVerts));
   g.computeVertexNormals();
   current=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7}));
   scene.add(current);
-  return `status:${body.status()}  genus:${body.genus()}  tri:${body.numTri()}  体积:${(body.volume()/1000).toFixed(1)}cm³`;
+  return info;
 }
 
 /* ================= 主循环 ================= */
@@ -392,6 +387,46 @@ async function refresh(){
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
 }
 document.getElementById("rebuild").onclick=refresh;
+
+/* ================= 模型 JSON 面板：导入 / 导出 / 校验 / 回写 ================= */
+const $=id=>document.getElementById(id);
+const ptext=$("ptext"), pdirty=$("pdirty");
+const silentSave=async(name,data)=>{                     // 统一走服务器静默存盘，绝不弹窗
+  const r=await fetch("/save?name="+encodeURIComponent(name),{method:"POST",body:data});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+};
+ptext.addEventListener("input",()=>{
+  pdirty.textContent = ptext.value!==modelText ? "（未应用修改）" : "";
+});
+$("apply").onclick=()=>{ modelText=ptext.value; pdirty.textContent=""; refresh(); };
+$("importFile").onclick=()=>$("filein").click();
+$("filein").addEventListener("change",async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  try{
+    modelText=await f.text(); ptext.value=modelText; pdirty.textContent="";
+    $("psrc").textContent="← "+f.name; refresh();
+  }catch(err){ errBox.textContent="❌ 读取文件失败："+err.message; }
+  e.target.value="";
+});
+$("saveModel").onclick=async()=>{
+  modelText=ptext.value; pdirty.textContent="";
+  try{
+    const r=await fetch("/savemodel",{method:"POST",body:modelText});   // 回写 framework/lyre.model.json
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const j=await r.json();
+    $("psrc").textContent=""; hud.textContent="✅ 模型 JSON 已回写："+j.saved;
+  }catch(e){ hud.textContent="❌ 回写失败（需用 framework/server.py 启动服务）："+e.message; }
+};
+$("exportCopy").onclick=async()=>{
+  try{
+    const stamp=new Date().toISOString().replace(/[:T]/g,"-").slice(0,19);
+    const j=await silentSave(`lyre_${stamp}.model.json`,ptext.value);
+    hud.textContent="✅ 副本已导出："+j.saved;
+  }catch(e){ hud.textContent="❌ 导出失败："+e.message; }
+};
+$("ptitle").onclick=()=>$("panel").classList.toggle("collapsed");
+
 window.__exportSTL=async()=>{
   if(!current) return;
   const txt=new STLExporter().parse(current);
@@ -409,7 +444,13 @@ addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updat
   renderer.setSize(innerWidth,innerHeight);fitView();applyCam();});
 fitView(); applyCam();
 window.__view = { get camera(){return camera;}, get scene(){return scene;}, get current(){return current;} };
-refresh();
+(async()=>{                                              // 启动：载入模型 JSON 到面板，再首建
+  try{
+    modelText = await (await fetch("./lyre.model.json?v="+Date.now())).text();
+    ptext.value = modelText;
+  }catch(e){ errBox.textContent="❌ 模型 JSON 载入失败："+e.message; }
+  refresh();
+})();
 requestAnimationFrame(frame);
 </script>
 </body>

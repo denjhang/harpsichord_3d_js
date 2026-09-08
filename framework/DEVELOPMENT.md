@@ -12,7 +12,8 @@
 lyre.model.json          参数单一来源（尺寸/孔位/轮廓/抽壳/品条）
       │  fetch
       ▼
-index.html 求值器        params + outline.bezierSegs
+index.html（UI 层）       params + outline.bezierSegs
+      │  src/lyre.build.mjs（内核层）
       │   ① 贝塞尔链采样为点阵（每段 24 点，mm）
       │   ② CrossSection([外圈, 弦窗圈], "NonZero")   ← 内圈反向绕行自动成孔
       │   ③ extrude(thickness)                        ← 实体
@@ -34,11 +35,27 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 
 | 文件 | 作用 |
 |---|---|
-| `lyre.model.json` | 参数单一来源。**改这里 + 点"重建"** |
-| `index.html` | 求值器 + three.js 查看器 + 热床/导航立方体 UI + STL 静默导出 |
-| `server.py` | `python framework/server.py 8765`：静态服务 + `POST /save?name=` 存盘 |
-| `out/` | STL 输出目录（gitignore） |
+| `lyre.model.json` | 参数单一来源。页面内改（JSON 面板）或直接改文件后点"重建" |
+| `index.html` | 查看器 + 热床/导航立方体 UI + **模型 JSON 面板**（编辑/校验/导入/导出/回写） |
+| `src/lyre.build.mjs` | **几何内核**：`validateModel(json)` 校验 + `buildBody(json)` 建模，与 UI 解耦，Node 可复用 |
+| `server.py` | `python framework/server.py 8765`：静态服务 + `POST /save?name=` 存 out/ + `POST /savemodel` 回写模型文件 |
+| `out/` | STL / JSON 副本输出目录（gitignore） |
 | `../lab/node_modules/` | manifold-3d + three 本地依赖（npmmirror 安装） |
+
+## 2.5 模型 JSON 导入 / 导出（页面内闭环）
+
+页面左下角"模型 JSON"面板（点标题可折叠），按钮全部**静默无弹窗**：
+
+| 按钮 | 行为 |
+|---|---|
+| 应用重建 | 文本区 JSON → `validateModel()` 校验 → `buildBody()` 重建；错误红字上屏，不打断页面 |
+| 导入文件… | 本地 .json 文件 → 载入文本区并自动重建 |
+| 保存到模型文件 | 文本区内容 → `POST /savemodel` 回写 `framework/lyre.model.json`（下次启动生效） |
+| 导出副本 | 带时间戳副本 → `framework/out/lyre_*.model.json` |
+
+- 文本区改动未应用时标题旁显示"（未应用修改）"
+- 校验覆盖：必填字段、正数约束、bezierSegs 每段 6 数字、units 只支持 mm
+- 内核与页面解耦后，同一份 JSON 也能在 Node 里跑（`import {buildBody} from "./src/lyre.build.mjs"`）
 
 ## 3. 参数模型（lyre.model.json）
 
@@ -102,4 +119,11 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 - STL 无单位/材质信息（Manifold 官方建议 3MF，拓扑无损）——后续可加 3MF 导出
 - 抽壳是"轮廓内缩相减"轻量方案，凹腔深处的壁厚均匀性依赖轮廓曲率（当前琴体 OK）
 - 品条/音柱等附件目前是简单几何；可逐步参数化细化
-- 未做：参数 GUI 面板（当前改 JSON）、多零件装配拆件
+- 未做：参数滑杆 GUI（当前面板改 JSON 文本）、多零件装配拆件、3MF 导出
+- 成为"完整框架"尚缺的必备能力（按优先级）：
+  1. 多零件装配（model.parts[]：每个零件独立 JSON + 定位变换 + 零件间布尔/配合）
+  2. 更多几何算子：revolve / loft / 圆角（Manifold 有 revolve；圆角需偏移方案）
+  3. 撤销/重做（JSON 文本历史栈即可，成本低）
+  4. 3MF/OBJ 导出（OBJ 近乎免费；3MF 需按 OPC 打包）
+  5. 参数滑杆面板（读 params 生成控件 + 联动重建）
+  6. meta.version 迁移机制（改 schema 时不破坏旧模型文件）
