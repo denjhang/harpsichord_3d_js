@@ -4,10 +4,17 @@
 <meta charset="UTF-8">
 <title>Lyre 轻量参数化建模 · Manifold</title>
 <style>
-  body{margin:0;overflow:hidden;font-family:monospace;background:#dfe1e4}
-  #info{position:fixed;top:12px;left:14px;color:#333;font-size:13px;line-height:1.7;white-space:pre;pointer-events:none}
-  #bar{position:fixed;top:12px;right:14px;display:flex;gap:8px}
+  html,body{margin:0;height:100%;overflow:hidden;font-family:Georgia,serif;background:#dfe1e4;user-select:none;touch-action:none}
+  canvas.view{display:block;cursor:grab}
+  canvas.view.dragging{cursor:grabbing}
+  #hud{position:fixed;top:16px;left:20px;color:#5a554e;opacity:.92;font-size:13px;line-height:1.8;pointer-events:none;white-space:pre}
+  #hud b{color:#3a362f;font-size:16px;letter-spacing:2px}
+  #tips{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#8b857a;font-size:12.5px;pointer-events:none}
+  #tips span{color:#55504a}
+  #cube{position:fixed;top:14px;right:14px;width:132px;height:132px;cursor:pointer}
+  #bar{position:fixed;bottom:40px;right:14px;display:flex;gap:8px}
   button{padding:8px 16px;font-size:14px;cursor:pointer}
+  #err{position:fixed;top:160px;left:20px;right:160px;color:#b03030;font-size:12px;white-space:pre-wrap;pointer-events:none}
 </style>
 <script type="importmap">
 {"imports":{"three":"../lab/node_modules/three/build/three.module.js",
@@ -16,117 +23,388 @@
 </script>
 </head>
 <body>
-<div id="info">loading…</div>
+<div id="hud"></div>
+<div id="err"></div>
+<div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 右上角立方体=<span>快速视角</span></div>
+<canvas id="cube" width="264" height="264" style="width:132px;height:132px"></canvas>
 <div id="bar"><button id="rebuild">重建</button><button id="stl">导出 STL</button></div>
 <script type="module">
 import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLExporter } from "three/addons/exporters/STLExporter.js";
 import Module from "manifold-3d";
 
-const info = document.getElementById("info");
-const wasm = await Module(); wasm.setup();
-const { Manifold, CrossSection, setMinCircularAngle } = wasm;
-setMinCircularAngle(6);
+/* ================= 场景（z-up，单位 mm）================= */
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe1e4);
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 1, 4000);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.domElement.className = "view";
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff,.75));
+const key = new THREE.DirectionalLight(0xffffff,1.5); key.position.set(200,-180,300); scene.add(key);
+scene.add(new THREE.HemisphereLight(0xf0f2f5,0x9a938a,.5));
 
-/* —— 参数化求值：model.json → Manifold 实体 —— */
-async function build() {
+/* ================= H5 移植：热床托盘（250×250）================= */
+function bedTexture(){
+  const S=1250, px=S/25;
+  const c=document.createElement("canvas"); c.width=S; c.height=S;
+  const g=c.getContext("2d");
+  g.fillStyle="#3a3f44"; g.fillRect(0,0,S,S);
+  for(let i=0;i<2600;i++){
+    g.fillStyle=`rgba(${190+Math.random()*60|0},${195+Math.random()*60|0},${205+Math.random()*60|0},${Math.random()*.06})`;
+    g.fillRect(Math.random()*S,Math.random()*S,1.5,1.5);
+  }
+  const cx=S/2;
+  for(let i=-12;i<=12;i++){
+    const p=cx+i*px, major=i%5===0;
+    g.strokeStyle=major?"rgba(215,222,230,.65)":"rgba(205,212,220,.32)";
+    g.lineWidth=major?3:1.5;
+    g.beginPath();g.moveTo(p,0);g.lineTo(p,S);g.stroke();
+    g.beginPath();g.moveTo(0,p);g.lineTo(S,p);g.stroke();
+  }
+  g.strokeStyle="rgba(230,235,240,.75)"; g.lineWidth=5; g.strokeRect(3,3,S-6,S-6);
+  g.strokeStyle="rgba(230,235,240,.45)"; g.lineWidth=2.5;
+  for(const [mx,my] of [[46,46],[S-46,46],[46,S-46],[S-46,S-46]]){
+    g.beginPath();g.moveTo(mx+(mx<cx?30:-30),my);g.lineTo(mx,my);g.lineTo(mx,my+(my<cx?30:-30));g.stroke();
+  }
+  const ox=64, oy=S-64;
+  g.lineWidth=6; g.lineCap="round";
+  g.strokeStyle="#e0392b"; g.beginPath();g.moveTo(ox,oy);g.lineTo(ox+88,oy);g.stroke();
+  g.beginPath();g.moveTo(ox+88,oy);g.lineTo(ox+70,oy-9);g.moveTo(ox+88,oy);g.lineTo(ox+70,oy+9);g.stroke();
+  g.strokeStyle="#37b24d"; g.beginPath();g.moveTo(ox,oy);g.lineTo(ox,oy-88);g.stroke();
+  g.beginPath();g.moveTo(ox,oy-88);g.lineTo(ox-9,oy-70);g.moveTo(ox,oy-88);g.lineTo(ox+9,oy-70);g.stroke();
+  g.strokeStyle="#3b6fe0"; g.beginPath();g.moveTo(ox,oy);g.lineTo(ox-46,oy+46);g.stroke();
+  g.lineCap="butt";
+  g.fillStyle="rgba(245,246,248,.92)";
+  g.beginPath(); g.roundRect(S*.5-330,S-138,660,58,26); g.fill();
+  g.fillStyle="#33373c"; g.font="bold 34px Georgia"; g.textAlign="center";
+  g.fillText("LYRE · 250 × 250 mm · PLA/ABS/PETG",S/2,S-96);
+  g.fillStyle="#1fae52"; g.font="italic bold 72px Georgia"; g.textAlign="left";
+  g.fillText("01",S-210,S-120);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8; return t;
+}
+{
+  const plate=new THREE.Mesh(new THREE.BoxGeometry(250,250,3),
+    [0,1,2,3,4,5].map(i=>i===4
+      ? new THREE.MeshStandardMaterial({map:bedTexture(),roughness:.85,metalness:.1})
+      : new THREE.MeshStandardMaterial({color:0x2c3034,roughness:.7})));
+  plate.position.z=-1.5; scene.add(plate);
+  const shadow=new THREE.Mesh(new THREE.CircleGeometry(1,32),
+    new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.12}));
+  shadow.scale.set(95,130,1); shadow.position.z=.05; scene.add(shadow);
+}
+
+/* ================= H5 移植：自由视角相机（yaw/pitch/roll）================= */
+const target=new THREE.Vector3(0,0,110);
+let yaw=.62, pitch=.5, roll=0, dist=620;
+function fitView(){
+  const fV=camera.fov*Math.PI/180;
+  const fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
+  const rad=Math.max(250, 240);
+  dist=(rad*1.25)/Math.tan(Math.min(fV,fH)/2);
+}
+function applyCam(){
+  pitch=Math.max(-1.45,Math.min(1.45,pitch));
+  camera.position.set(
+    target.x+dist*Math.cos(pitch)*Math.sin(yaw),
+    target.y+dist*Math.cos(pitch)*Math.cos(yaw),
+    target.z+dist*Math.sin(pitch));
+  camera.up.set(Math.sin(roll),0,Math.cos(roll));
+  camera.lookAt(target);
+}
+let mode=null,px=0,py=0;
+const viewEl=renderer.domElement;
+viewEl.addEventListener("pointerdown",e=>{ mode=e.shiftKey?"pan":"rot"; px=e.clientX; py=e.clientY; viewEl.classList.add("dragging"); viewEl.setPointerCapture(e.pointerId); });
+viewEl.addEventListener("pointermove",e=>{
+  const dx=e.clientX-px, dy=e.clientY-py;
+  if(mode==="rot"){ yaw-=dx*.006; pitch+=dy*.006; applyCam(); }
+  else if(mode==="pan"){
+    const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+    const up=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    target.addScaledVector(right,-dx*dist*.0011).addScaledVector(up,dy*dist*.0011);
+    applyCam();
+  }
+  px=e.clientX; py=e.clientY;
+});
+addEventListener("pointerup",()=>{mode=null;viewEl.classList.remove("dragging");});
+viewEl.addEventListener("wheel",e=>{e.preventDefault();dist*=Math.pow(1.0011,e.deltaY);dist=Math.max(120,Math.min(2500,dist));applyCam();},{passive:false});
+
+/* ================= H5 移植：导航立方体 ================= */
+const cubeCv=document.getElementById("cube"), cg=cubeCv.getContext("2d");
+let widgetMode="cube";
+const hitItems=[];
+const FACES=[
+  {n:[0, 1,0],u:[1,0,0], v:[0,0,1], col:"#d9cdb4", l:"前", v0:0,         p0:0},
+  {n:[0,-1,0],u:[-1,0,0],v:[0,0,1], col:"#c4b8a0", l:"后", v0:Math.PI,   p0:0},
+  {n:[1, 0,0],u:[0,0,-1],v:[0,0,1], col:"#cfc3aa", l:"右", v0:-Math.PI/2,p0:0},
+  {n:[-1,0,0],u:[0,0,1], v:[0,0,1], col:"#bfb39a", l:"左", v0:Math.PI/2, p0:0},
+  {n:[0, 0,1],u:[1,0,0], v:[0,-1,0],col:"#e6dcc6", l:"上", v0:0,         p0:Math.PI/2},
+  {n:[0, 0,-1],u:[1,0,0],v:[0,1,0], col:"#b3a78f", l:"下", v0:0,         p0:-Math.PI/2},
+];
+const D2R=Math.PI/180;
+function cubeRot(v){
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const x=v[0]*cy+v[1]*sy, y0=-v[0]*sy+v[1]*cy;
+  return [x, y0*cp-v[2]*sp, y0*sp+v[2]*cp];
+}
+function roundedPoly(pts,rad){
+  const p=new Path2D(), n=pts.length;
+  const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+  for(let i=0;i<n;i++){
+    const prev=pts[(i-1+n)%n], cur=pts[i], next=pts[(i+1)%n];
+    const l1=dist(cur,prev), l2=dist(next,cur);
+    const r=Math.min(rad,l1/2.2,l2/2.2);
+    const ux=(cur[0]-prev[0])/l1, uy=(cur[1]-prev[1])/l1;
+    const wx=(next[0]-cur[0])/l2, wy=(next[1]-cur[1])/l2;
+    const ax=cur[0]-ux*r, ay=cur[1]-uy*r, bx=cur[0]+wx*r, by=cur[1]+wy*r;
+    if(i===0) p.moveTo(ax,ay); else p.lineTo(ax,ay);
+    p.quadraticCurveTo(cur[0],cur[1],bx,by);
+  }
+  p.closePath(); return p;
+}
+function triPath(x,y,dir,s){
+  const d=[[0,-1],[1,0],[0,1],[-1,0]][dir];
+  const p1=[x-d[1]*s, y+d[0]*s], p2=[x+d[1]*s, y-d[0]*s], tip=[x+d[0]*s*1.5, y+d[1]*s*1.5];
+  const p=new Path2D(); p.moveTo(...p1); p.lineTo(...p2); p.lineTo(...tip); p.closePath(); return p;
+}
+function drawCube(){
+  const S=264, c=S/2;
+  cg.clearRect(0,0,S,S);
+  hitItems.length=0;
+  const reg=(path,act,tip="")=>hitItems.push({path,act,tip});
+  cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,116,0,7); cg.fill();
+  cg.strokeStyle="rgba(90,85,78,.35)"; cg.lineWidth=2; cg.stroke();
+  const proj=r=>[c+r[0]*80, c-r[2]*80];
+  if(widgetMode==="cube"){
+    const h=.6, rad=36, sk=.68;
+    const mixHex=(a,b)=>{const pa=parseInt(a.slice(1),16),pb=parseInt(b.slice(1),16);
+      const m=i=>Math.round(((pa>>i&255)+(pb>>i&255))/2);
+      return "#"+[16,8,0].map(i=>m(i).toString(16).padStart(2,"0")).join("");};
+    const dirOf=(yaw,pitch)=>[Math.cos(pitch)*Math.sin(yaw),Math.cos(pitch)*Math.cos(yaw),Math.sin(pitch)];
+    const viewOf=dirs=>{const v=dirs.reduce((a,d)=>[a[0]+d[0],a[1]+d[1],a[2]+d[2]],[0,0,0]);
+      return [Math.atan2(v[0],v[1]), Math.asin(Math.max(-1,Math.min(1,v[2]/Math.hypot(...v))))];};
+    const p3=(f,su,sv,k)=>cubeRot([(f.n[0]+f.u[0]*su+f.v[0]*sv)*h*k,
+                                   (f.n[1]+f.u[1]*su+f.v[1]*sv)*h*k,
+                                   (f.n[2]+f.u[2]*su+f.v[2]*sv)*h*k]);
+    const keyOf=(f,su,sv)=>p3(f,su,sv,1).map(v=>v.toFixed(2)).join("|");
+    const vis=FACES.map(f=>({f,rn:cubeRot(f.n)})).filter(o=>o.rn[2]>.02).sort((a,b)=>a.rn[2]-b.rn[2]);
+    const ctrOf=f=>proj(cubeRot(f.n.map(v=>v*h)));
+    for(const {f,rn} of vis){
+      const pts=[p3(f,-1,-1,sk),p3(f,1,-1,sk),p3(f,1,1,sk),p3(f,-1,1,sk)].map(proj);
+      const path=roundedPoly(pts,rad);
+      cg.fillStyle=f.col; cg.globalAlpha=.6+.4*rn[2]; cg.fill(path); cg.globalAlpha=1;
+      cg.strokeStyle="#6a645c"; cg.lineWidth=1.4; cg.stroke(path);
+      const ctrp=ctrOf(f), tp=[ctrp[0]+(ctrp[0]-c)*.25, ctrp[1]+(ctrp[1]-c)*.25];
+      cg.fillStyle="#4a453e"; cg.font="bold 19px Georgia";
+      cg.textAlign="center"; cg.textBaseline="middle";
+      cg.fillText(f.l,tp[0],tp[1]);
+      reg(path,()=>animCam(f.v0,f.p0,0),"面:"+f.l);
+    }
+    for(let i=0;i<vis.length;i++)for(let j=i+1;j<vis.length;j++){
+      const A=vis[i].f, B=vis[j].f, sa=[], sb=[];
+      for(const su of[-1,1])for(const sv of[-1,1]){
+        const k=keyOf(A,su,sv);
+        for(const u of[-1,1])for(const v of[-1,1])
+          if(keyOf(B,u,v)===k){ sa.push([su,sv]); sb.push([u,v]); }
+      }
+      if(sa.length!==2) continue;
+      const q=[p3(A,...sa[0],sk),p3(A,...sa[1],sk),p3(B,...sb[1],sk),p3(B,...sb[0],sk)].map(proj);
+      const strip=roundedPoly(q,14);
+      cg.fillStyle=mixHex(A.col,B.col); cg.fill(strip);
+      cg.strokeStyle="#6a645c"; cg.lineWidth=1.2; cg.stroke(strip);
+      const [ty,tp2]=viewOf([dirOf(A.v0,A.p0),dirOf(B.v0,B.p0)]);
+      const mid=[(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4];
+      const hot=new Path2D(); hot.arc(mid[0],mid[1],30,0,7);
+      reg(hot,()=>animCam(ty,tp2,0),"棱:"+A.l+B.l);
+      reg(strip,()=>animCam(ty,tp2,0));
+    }
+    if(vis.length===3){
+      const [A,B,C]=vis.map(o=>o.f);
+      const pts=[];
+      const loc=f=>{const m={};for(const su of[-1,1])for(const sv of[-1,1])m[keyOf(f,su,sv)]=[su,sv];return m;};
+      const mA=loc(A),mB=loc(B),mC=loc(C);
+      for(const k in mA) if(mB[k]&&mC[k]){
+        pts.push(proj(p3(A,...mA[k],sk)),proj(p3(B,...mB[k],sk)),proj(p3(C,...mC[k],sk)));
+        break;
+      }
+      if(pts.length===3){
+        const tri=roundedPoly(pts,14);
+        cg.fillStyle=mixHex(mixHex(A.col,B.col),C.col); cg.fill(tri);
+        cg.strokeStyle="#6a645c"; cg.lineWidth=1.2; cg.stroke(tri);
+        const [ty,tp2]=viewOf([A,B,C].map(f=>dirOf(f.v0,f.p0)));
+        const g2=[(pts[0][0]+pts[1][0]+pts[2][0])/3,(pts[0][1]+pts[1][1]+pts[2][1])/3];
+        const hot2=new Path2D(); hot2.arc(g2[0],g2[1],34,0,7);
+        reg(hot2,()=>animCam(ty,tp2,0),"角:"+A.l+B.l+C.l);
+        reg(tri,()=>animCam(ty,tp2,0));
+      }
+    }
+  } else {
+    for(const [ax,col,l] of [[[1,0,0],"#e0392b","X"],[[0,1,0],"#37b24d","Y"],[[0,0,1],"#3b6fe0","Z"]]){
+      const r=cubeRot(ax), [ex,ey]=proj(r);
+      cg.strokeStyle=col; cg.lineWidth=5; cg.lineCap="round";
+      cg.beginPath();cg.moveTo(c,c);cg.lineTo(ex,ey);cg.stroke();
+      cg.fillStyle=col; cg.font="bold 15px Georgia"; cg.textAlign="center"; cg.textBaseline="middle";
+      cg.fillText(l,ex*1.12-c*.12,ey*1.12-c*.12);
+    }
+    cg.lineCap="butt";
+  }
+  const A2=102;
+  const arrows=[
+    [c,  c-A2, 0, ()=>animCam(yaw,           Math.min(1.45,pitch+45*D2R), roll)],
+    [c,  c+A2, 2, ()=>animCam(yaw,           Math.max(-1.45,pitch-45*D2R), roll)],
+    [c-A2,c,   3, ()=>animCam(yaw+45*D2R,    pitch, roll)],
+    [c+A2,c,   1, ()=>animCam(yaw-45*D2R,    pitch, roll)],
+  ];
+  for(const [x,y,d,act] of arrows){
+    const p=triPath(x,y,d,12);
+    cg.fillStyle="rgba(120,112,102,.55)"; cg.fill(p);
+    reg(p,act,"箭头"+d);
+  }
+  const bend=(cx2,cy2,a0,a1,act)=>{
+    const r=23, pt=t=>{const q=t*D2R; return [cx2+Math.cos(q)*r, cy2-Math.sin(q)*r];};
+    const p=new Path2D(); p.moveTo(...pt(a0));
+    for(let i=1;i<=16;i++) p.lineTo(...pt(a0+(a1-a0)*i/16));
+    cg.strokeStyle="rgba(120,112,102,.6)"; cg.lineWidth=5; cg.lineCap="round"; cg.stroke(p);
+    cg.lineCap="butt";
+    const sgn=(a1>a0?1:-1), tq=a1*D2R;
+    const tx=-Math.sin(tq)*sgn, ty2=-Math.cos(tq)*sgn;
+    const [ex,ey]=pt(a1);
+    const hp=new Path2D();
+    hp.moveTo(ex+tx*9,ey+ty2*9);
+    hp.lineTo(ex-tx*3-ty2*5,ey-ty2*3+tx*5);
+    hp.lineTo(ex-tx*3+ty2*5,ey-ty2*3-tx*5);
+    hp.closePath();
+    cg.fillStyle="rgba(120,112,102,.6)"; cg.fill(hp);
+    const hit=new Path2D(); hit.arc(cx2,cy2,26,0,7);
+    reg(hit,act,"弯箭头");
+  };
+  bend(c-66,c-66, 180, 90, ()=>animCam(yaw,pitch,roll+30*D2R));
+  bend(c+66,c-66, 0,   90, ()=>animCam(yaw,pitch,roll-30*D2R));
+  const mini=new Path2D(); mini.rect(212,212,40,40);
+  cg.fillStyle="rgba(250,250,250,.8)"; cg.fill(mini);
+  cg.strokeStyle="rgba(90,85,78,.4)"; cg.lineWidth=1.5; cg.stroke(mini);
+  const mx2=232,my2=232,s2=9;
+  const iso=(x,y,z)=>[mx2+(x-z)*s2*.9, my2-(y*1.1-(x+z)*.45)*s2];
+  for(const [p4,col] of [
+    [[iso(-1,1,-1),iso(1,1,-1),iso(1,1,1),iso(-1,1,1)],"#cfc3aa"],
+    [[iso(-1,-1,1),iso(1,-1,1),iso(1,1,1),iso(-1,1,1)],"#b3a78f"],
+    [[iso(1,-1,1),iso(1,-1,-1),iso(1,1,-1),iso(1,1,1)],"#c4b8a0"],
+  ]){
+    const mp=roundedPoly(p4,3);
+    cg.fillStyle=col; cg.fill(mp); cg.strokeStyle="#6a645c"; cg.lineWidth=1; cg.stroke(mp);
+  }
+  reg(mini,()=>{widgetMode=widgetMode==="cube"?"axes":"cube";},"小立方");
+}
+function cubeHit(e){
+  const r=cubeCv.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*2, y:(e.clientY-r.top)*2};
+}
+cubeCv.addEventListener("click",e=>{
+  const {x,y}=cubeHit(e);
+  if(!hitItems.length) drawCube();
+  for(let i=hitItems.length-1;i>=0;i--)
+    if(cg.isPointInPath(hitItems[i].path,x,y)){ hitItems[i].act(); return; }
+});
+cubeCv.addEventListener("pointermove",e=>{
+  const {x,y}=cubeHit(e);
+  if(!hitItems.length) drawCube();
+  cubeCv.style.cursor=hitItems.some(it=>cg.isPointInPath(it.path,x,y))?"pointer":"default";
+});
+let camAnim=null;
+function animCam(ty,tp,tr=roll){
+  const s={yaw,pitch,roll,dist};
+  const dYaw=((ty-s.yaw+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
+  const dRoll=((tr-s.roll+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
+  camAnim={t0:performance.now(),dur:450,s,dYaw,tp:tp-pitch,dRoll};
+}
+function stepCube(t){
+  if(camAnim){
+    const k=Math.min(1,(t-camAnim.t0)/camAnim.dur), e=1-Math.pow(1-k,3);
+    yaw=camAnim.s.yaw+camAnim.dYaw*e; pitch=camAnim.s.pitch+camAnim.tp*e;
+    roll=camAnim.s.roll+camAnim.dRoll*e;
+    if(k>=1)camAnim=null;
+    applyCam();
+  }
+  drawCube();
+}
+
+/* ================= 里拉建模（Manifold，无布尔）================= */
+let current=null;
+async function build(){
+  const wasm = await Module(); wasm.setup?.();
+  const { Manifold, CrossSection, setMinCircularAngle } = wasm;
+  setMinCircularAngle(6);
   const model = await (await fetch("./lyre.model.json")).json();
   const p = model.params;
-  const K = p.height / 32.5;                       // cm → mm（240/325）
-  const X = v => v * K, Y = v => (v - 16.25) * K;
-
-  // 1) 轮廓采样（贝塞尔链 → 点）
-  const bez = (p0,p1,p2,p3,t) => { const u=1-t; return [
+  const K = p.height/32.5;
+  const X = v => v*K, Y = v => (v-16.25)*K;
+  const bez=(p0,p1,p2,p3,t)=>{const u=1-t;return [
     u*u*u*p0[0]+3*u*u*t*p1[0]+3*u*t*t*p2[0]+t*t*t*p3[0],
-    u*u*u*p0[1]+3*u*u*t*p1[1]+3*u*t*t*p2[1]+t*t*t*p3[1]]; };
-  const pts = []; let cur = [0,.6];
-  for (const s of model.outline.bezierSegs) {
-    const p0=cur, p1=[s[0],s[1]], p2=[s[2],s[3]], p3=[s[4],s[5]];
-    for (let i=1;i<=24;i++){ const [x,y]=bez(p0,p1,p2,p3,i/24); pts.push([X(x), Y(y)]); }
-    cur = p3;
+    u*u*u*p0[1]+3*u*u*t*p1[1]+3*u*t*t*p2[1]+t*t*t*p3[1]];};
+  const pts=[]; let cur=[0,.6];
+  for(const s of model.outline.bezierSegs){
+    const p0=cur,p1=[s[0],s[1]],p2=[s[2],s[3]],p3=[s[4],s[5]];
+    for(let i=1;i<=24;i++){const [x,y]=bez(p0,p1,p2,p3,i/24); pts.push([X(x),Y(y)]);}
+    cur=p3;
   }
-  // 弦窗：大椭圆镂空（H5 设计要点：顶部留闭合横梁），顺时针绕行 → NonZero 规则下成孔
-  const win = [];
-  for (let i = p.window.SAMPLE; i >= 0; i--) {
-    const t = (i / p.window.SAMPLE) * Math.PI * 2;
-    win.push([p.window.cx + p.window.rx * Math.cos(t),
-              p.window.cy + p.window.ry * Math.sin(t)]);
+  const win=[];
+  for(let i=p.window.SAMPLE;i>=0;i--){
+    const t=(i/p.window.SAMPLE)*Math.PI*2;
+    win.push([p.window.cx+p.window.rx*Math.cos(t), p.window.cy+p.window.ry*Math.sin(t)]);
   }
-  const outer = new CrossSection([pts, win], "NonZero"); // SimplePolygon[]：外圈 + 弦窗
-
-  // 2) 外壳实体
-  let body = outer.extrude(p.thickness);
-
-  // 3) 轻量抽壳：内缩轮廓挤出后相减（上下/四周壁厚 = wall）
-  const inner = outer.offset(-p.wall, "Round").extrude(p.thickness - 2*p.wall)
-                     .translate([0, 0, p.wall]);
-  body = body.subtract(inner);
-
-  // 4) 孔：圆音孔 + 7 穿弦孔（z 全贯穿）
-  const holes = [ Manifold.cylinder(p.thickness+2, p.soundHole.r, p.soundHole.r)
-                     .translate([0, p.soundHole.cy, -1]) ];
-  for (let i=0;i<p.stringHoles.n;i++)
-    holes.push(Manifold.cylinder(p.thickness+2, p.stringHoles.r, p.stringHoles.r)
-      .translate([(i-(p.stringHoles.n-1)/2)*p.stringHoles.gap, p.stringHoles.cy, -1]));
-  for (const h of holes) body = body.subtract(h);
-
-  // 5) 品条（实体并到面上）
-  body = body.add(Manifold.cube([p.bridge.w, p.bridge.d, p.bridge.h], true)
-                     .translate([0, p.bridge.y, p.thickness + p.bridge.h/2]));
-
-  return { manifold: body, stats: {
-    volume_cm3: (body.volume()/1000).toFixed(1),
-    tri: body.numTri(), genus: body.genus(),
-    status: String(body.status()) } };
-}
-
-/* —— Manifold → three.js —— */
-let current = null;
-const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe1e4);
-const cam = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, .1, 2000);
-cam.position.set(180,-200,190); cam.up.set(0,0,1); cam.lookAt(0,0,110);
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(innerWidth,innerHeight); document.body.appendChild(renderer.domElement);
-scene.add(new THREE.AmbientLight(0xffffff,.7));
-const key = new THREE.DirectionalLight(0xffffff,1.5); key.position.set(150,-120,250); scene.add(key);
-const grid = new THREE.GridHelper(500,10); scene.add(grid);
-new OrbitControls(cam, renderer.domElement);
-
-async function refresh() {
-  try {
-  const { manifold, stats } = await build();
-  if (current) { scene.remove(current); current.geometry.dispose(); }
-  const mesh = manifold.getMesh();
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(mesh.vertProperties), 3));
+  const outer=new CrossSection([pts,win],"NonZero");
+  let body=outer.extrude(p.thickness);
+  const inner=outer.offset(-p.wall,"Round").extrude(p.thickness-2*p.wall).translate([0,0,p.wall]);
+  body=body.subtract(inner);
+  const holes=[Manifold.cylinder(p.thickness+2,p.soundHole.r,p.soundHole.r).translate([0,p.soundHole.cy,-1])];
+  for(let i=0;i<p.stringHoles.n;i++)
+    holes.push(Manifold.cylinder(p.thickness+2,p.stringHoles.r,p.stringHoles.r)
+      .translate([(i-(p.stringHoles.n-1)/2)*p.stringHoles.gap,p.stringHoles.cy,-1]));
+  for(const h of holes) body=body.subtract(h);
+  body=body.add(Manifold.cube([p.bridge.w,p.bridge.d,p.bridge.h],true)
+    .translate([0,p.bridge.y,p.thickness+p.bridge.h/2]));
+  if(current){scene.remove(current);current.geometry.dispose();}
+  const mesh=body.getMesh();
+  const g=new THREE.BufferGeometry();
+  g.setAttribute("position",new THREE.BufferAttribute(new Float32Array(mesh.vertProperties),3));
   g.setIndex(Array.from(mesh.triVerts));
   g.computeVertexNormals();
-  current = new THREE.Mesh(g, new THREE.MeshStandardMaterial({color:0xd9c49a, roughness:.7}));
+  current=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7}));
   scene.add(current);
-  info.textContent =
-`Lyre · Manifold 内核 ✅
-status : ${stats.status}   genus: ${stats.genus}
-tri    : ${stats.tri}
-体积   : ${stats.volume_cm3} cm³（打印料）
-壁厚   : 2.4mm（轻量抽壳）`;
-  } catch(e) {
-    info.textContent = "❌ " + (e.stack || e.message);
-  }
+  return `status:${body.status()}  genus:${body.genus()}  tri:${body.numTri()}  体积:${(body.volume()/1000).toFixed(1)}cm³`;
 }
-window.__exportSTL = () => {
-  const txt = new STLExporter().parse(current);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([txt], {type:"model/stl"}));
-  a.download = "lyre_body.stl"; a.click();
+
+/* ================= 主循环 ================= */
+const hud=document.getElementById("hud"), errBox=document.getElementById("err");
+function frame(t){
+  try{
+    stepCube(t);
+    renderer.render(scene,camera);
+  }catch(e){ errBox.textContent="FRAME ❌ "+(e.stack||e.message).slice(0,300); }
+  requestAnimationFrame(frame);
+}
+async function refresh(){
+  errBox.textContent="";
+  try{
+    const msg=await build();
+    hud.textContent=`里拉琴 · Manifold 内核 ✅\n打印比例 1:1.35（240mm / 250 热床）\n${msg}`;
+  }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
+}
+document.getElementById("rebuild").onclick=refresh;
+window.__exportSTL=()=>{
+  if(!current) return;
+  const txt=new STLExporter().parse(current);
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([txt],{type:"model/stl"}));
+  a.download="lyre_body.stl"; a.click();
 };
-document.getElementById("rebuild").onclick = refresh;
-document.getElementById("stl").onclick = window.__exportSTL;
-addEventListener("resize", ()=>{ cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight); });
-await refresh();
-function loop(){ renderer.render(scene,cam); requestAnimationFrame(loop); }
-loop();
+document.getElementById("stl").onclick=window.__exportSTL;
+addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);fitView();applyCam();});
+fitView(); applyCam();
+window.__view = { get camera(){return camera;}, get scene(){return scene;}, get current(){return current;} };
+refresh();
+requestAnimationFrame(frame);
 </script>
 </body>
 </html>
