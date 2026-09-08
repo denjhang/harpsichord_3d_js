@@ -5,14 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>里拉竖琴 3D · Lyre Simulator</title>
 <style>
-  html,body{margin:0;height:100%;background:#151210;overflow:hidden;font-family:Georgia,serif;user-select:none;touch-action:none}
+  html,body{margin:0;height:100%;background:#dfe1e4;overflow:hidden;font-family:Georgia,serif;user-select:none;touch-action:none}
   #c3d{position:fixed;inset:0;display:block;cursor:grab}
   #c3d.dragging{cursor:grabbing}
-  #hud{position:fixed;top:16px;left:20px;color:#c9b896;opacity:.8;font-size:13px;line-height:1.8;pointer-events:none}
-  #hud b{color:#ead9ac;font-size:16px;letter-spacing:2px}
+  #hud{position:fixed;top:16px;left:20px;color:#5a554e;opacity:.92;font-size:13px;line-height:1.8;pointer-events:none}
+  #hud b{color:#3a362f;font-size:16px;letter-spacing:2px}
   #cube{position:fixed;top:16px;right:16px;width:110px;height:110px;cursor:pointer}
-  #tips{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#86775d;font-size:12.5px;pointer-events:none}
-  #tips span{color:#b3a27d}
+  #tips{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#8b857a;font-size:12.5px;pointer-events:none}
+  #tips span{color:#55504a}
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
@@ -20,7 +20,7 @@
 </head>
 <body>
 <canvas id="c3d"></canvas>
-<div id="hud"><b>里拉竖琴 · 7 弦</b><br>调弦：C4 D4 E4 G4 A4 C5 D5<br>Karplus-Strong 声学合成</div>
+<div id="hud"><b>里拉竖琴 · 7 弦</b><br>调弦：C4 D4 E4 G4 A4 C5 D5<br>打印比例 <b id="sc"></b>（缩至 240mm，适配 250 热床）<br>Karplus-Strong 声学合成</div>
 <canvas id="cube" width="220" height="220" style="width:110px;height:110px"></canvas>
 <div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 扫弦/点弦弹奏 · 键盘 <span>A S D F G H J / 1-7</span> · 右上角立方体=<span>快速视角</span></div>
 <script type="module">
@@ -62,15 +62,15 @@ const canvas=document.getElementById("c3d");
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0x17130f);
-scene.fog=new THREE.Fog(0x17130f,90,220);
+scene.background=new THREE.Color(0xdfe1e4);
+scene.fog=new THREE.Fog(0xdfe1e4,140,420);
 const camera=new THREE.PerspectiveCamera(42,1,.1,500);
 
-{ // 灯光
-  scene.add(new THREE.AmbientLight(0xffe8c0,.55));
-  const key=new THREE.DirectionalLight(0xfff1d6,1.5); key.position.set(18,30,35); scene.add(key);
-  const rim=new THREE.DirectionalLight(0xd0b090,.6); rim.position.set(-25,10,-20); scene.add(rim);
-  const bounce=new THREE.DirectionalLight(0x806040,.35); bounce.position.set(0,-30,10); scene.add(bounce);
+{ // 灯光（浅色工作区：高环境光 + 柔和主光）
+  scene.add(new THREE.AmbientLight(0xffffff,.8));
+  const key=new THREE.DirectionalLight(0xffffff,1.6); key.position.set(18,30,35); scene.add(key);
+  const rim=new THREE.DirectionalLight(0xdde4ee,.5); rim.position.set(-25,10,-20); scene.add(rim);
+  scene.add(new THREE.HemisphereLight(0xf0f2f5,0x9a938a,.5));
 }
 
 /* ---- 琴体轮廓（单位 cm，参考实物：全长32.5 厚2.8 顶部闭合）---- */
@@ -78,6 +78,10 @@ const NOTES=[261.63,293.66,329.63,392.00,440.00,523.25,587.33];
 const KEYMAP={a:0,s:1,d:2,f:3,g:4,h:5,j:6,"1":0,"2":1,"3":2,"4":3,"5":4,"6":5,"7":6};
 const GAP=1.55, X0=-(NOTES.length-1)/2*GAP;
 const H=32.5, TH=2.8;
+/* 打印热床 250×250mm：整体等比缩放到最长边 240mm（留对齐边距），后续 STL 导出沿用同一 SCALE */
+const BED=25;                                          // 热床边长(cm)
+const SCALE=24.0/H;                                    // 240mm / 325mm ≈ 0.7385
+document.getElementById("sc").textContent="1:"+(1/SCALE).toFixed(2);
 const shape=new THREE.Shape();
 shape.moveTo(0,.6);
 shape.bezierCurveTo( 3.2,.6, 6.4,1.6, 8.2,3.6);      // 底部右弧
@@ -132,6 +136,10 @@ body.geometry.center();                                // 居中，方便绕琴�
 const BODY=new THREE.Group(); BODY.add(body); scene.add(BODY);
 // 坐标换算：轮廓 y(0..32.5) → 世界 y(-16.25..16.25)；厚 2.8 → z ±1.4
 const cm=v=>v-H/2;
+/* 缩放到打印比例并落在热床面上（床面=世界 y=0） */
+BODY.scale.setScalar(SCALE);
+BODY.position.y=H/2*SCALE;
+const BODY_TOP=H*SCALE;                                // 缩放后琴体总高(cm) ≈ 24
 
 /* ---- 弦 ---- */
 const STR_TOP=31.0;                                    // 弦上端：缠绕在音柱上
@@ -179,9 +187,66 @@ for(let i=0;i<7;i++){
   pegs.push(grp);
 }
 
+/* ============ 打印热床托盘（仿切片软件 250×250 纹理PEI板）============ */
+function bedTexture(){
+  const S=1250, px=S/BED;                               // 50px/cm：1cm 网格清晰
+  const c=document.createElement("canvas"); c.width=S; c.height=S;
+  const g=c.getContext("2d");
+  g.fillStyle="#3a3f44"; g.fillRect(0,0,S,S);           // 深灰 PEI 底
+  for(let i=0;i<2600;i++){                              // 喷砂纹理噪点
+    g.fillStyle=`rgba(${190+Math.random()*60|0},${195+Math.random()*60|0},${205+Math.random()*60|0},${Math.random()*.06})`;
+    g.fillRect(Math.random()*S,Math.random()*S,1.5,1.5);
+  }
+  const cx=S/2;
+  for(let i=-12;i<=12;i++){                             // 网格：1cm 一格，5cm 加粗（步距=1cm=px）
+    const p=cx+i*px, major=i%5===0;
+    g.strokeStyle=major?"rgba(215,222,230,.65)":"rgba(205,212,220,.32)";
+    g.lineWidth=major?3:1.5;
+    g.beginPath();g.moveTo(p,0);g.lineTo(p,S);g.stroke();
+    g.beginPath();g.moveTo(0,p);g.lineTo(S,p);g.stroke();
+  }
+  g.strokeStyle="rgba(230,235,240,.75)"; g.lineWidth=5; // 外边框
+  g.strokeRect(3,3,S-6,S-6);
+  g.strokeStyle="rgba(230,235,240,.45)"; g.lineWidth=2.5;
+  for(const [mx,my] of [[46,46],[S-46,46],[46,S-46],[S-46,S-46]]){ // 四角 L 形标
+    g.beginPath();g.moveTo(mx+(mx<cx?30:-30),my);g.lineTo(mx,my);g.lineTo(mx,my+(my<cx?30:-30));g.stroke();
+  }
+  // 原点(前左角) RGB 坐标轴（切片软件风格：X红 Y绿 Z蓝）
+  const ox=64, oy=S-64;
+  g.lineWidth=6; g.lineCap="round";
+  g.strokeStyle="#e0392b"; g.beginPath();g.moveTo(ox,oy);g.lineTo(ox+88,oy);g.stroke();       // X→
+  g.beginPath();g.moveTo(ox+88,oy);g.lineTo(ox+70,oy-9);g.moveTo(ox+88,oy);g.lineTo(ox+70,oy+9);g.stroke();
+  g.strokeStyle="#37b24d"; g.beginPath();g.moveTo(ox,oy);g.lineTo(ox,oy-88);g.stroke();       // Y↑
+  g.beginPath();g.moveTo(ox,oy-88);g.lineTo(ox-9,oy-70);g.moveTo(ox,oy-88);g.lineTo(ox+9,oy-70);g.stroke();
+  g.strokeStyle="#3b6fe0"; g.beginPath();g.moveTo(ox,oy);g.lineTo(ox-46,oy+46);g.stroke();    // Z(斜向示意)
+  g.lineCap="butt";
+  // 前缘白色标牌条
+  g.fillStyle="rgba(245,246,248,.92)";
+  g.beginPath(); g.roundRect(S*.5-330,S-138,660,58,26); g.fill();
+  g.fillStyle="#33373c"; g.font="bold 34px Georgia"; g.textAlign="center";
+  g.fillText("LYRE · 250 × 250 mm · PLA/ABS/PETG",S/2,S-96);
+  // 右下角绿色序号（切片软件排板样式）
+  g.fillStyle="#1fae52"; g.font="italic bold 72px Georgia"; g.textAlign="left";
+  g.fillText("01",S-210,S-120);
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=8; return t;
+}
+{
+  const plate=new THREE.Mesh(
+    new THREE.BoxGeometry(BED,0.4,BED),
+    [0,1,2,3,4,5].map(i=>i===2                             // +Y 面贴网格纹理，其余深色侧面
+      ? new THREE.MeshStandardMaterial({map:bedTexture(),roughness:.85,metalness:.1})
+      : new THREE.MeshStandardMaterial({color:0x2c3034,roughness:.7})));
+  plate.position.y=-0.2; scene.add(plate);                // 床面顶=世界 y0
+  // 床面落影（切片软件风格淡影）
+  const shadow=new THREE.Mesh(new THREE.CircleGeometry(1,32),
+    new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:.12}));
+  shadow.rotation.x=-Math.PI/2; shadow.position.y=0.02;
+  shadow.scale.set(9.5,BODY_TOP/2.4,1); scene.add(shadow);
+}
+
 /* ============ 自由视角（操作对齐 FreeCAD）============ */
-const target=new THREE.Vector3(0,0,0);
-let yaw=.0, pitch=0, dist=62;
+const target=new THREE.Vector3(0,BODY_TOP/2,0);        // 初始对准琴体中部
+let yaw=.0, pitch=0, dist=58;
 function applyCam(){
   pitch=Math.max(-1.45,Math.min(1.45,pitch));
   camera.position.set(
@@ -238,64 +303,71 @@ window.addEventListener("keydown",e=>{
   if(i!==undefined) pluckSt(strings[i]);
 });
 
-/* ============ 视角立方体（右上角，类 FreeCAD 导航立方体）============ */
+/* ============ 视角立方体（真3D投影，六面着色+标签，点击切视角）============ */
 const cubeCv=document.getElementById("cube"), cg=cubeCv.getContext("2d");
+// 每面：法线、切向轴 u/v、底色、标签（与主视图 yaw/pitch 同步旋转）
 const FACES=[
-  {n:[0,0,1], l:"前"},{n:[0,0,-1],l:"后"},{n:[1,0,0],l:"右"},
-  {n:[-1,0,0],l:"左"},{n:[0,1,0],l:"上"},{n:[0,-1,0],l:"下"},
+  {n:[0,0, 1],u:[1,0,0],v:[0,1,0], col:"#d9cdb4", l:"前"},
+  {n:[0,0,-1],u:[-1,0,0],v:[0,1,0],col:"#c4b8a0", l:"后"},
+  {n:[1,0, 0],u:[0,0,-1],v:[0,1,0],col:"#cfc3aa", l:"右"},
+  {n:[-1,0,0],u:[0,0,1], v:[0,1,0],col:"#bfb39a", l:"左"},
+  {n:[0,1, 0],u:[1,0,0],v:[0,0,-1],col:"#e6dcc6", l:"上"},
+  {n:[0,-1,0],u:[1,0,0],v:[0,0,1], col:"#b3a78f", l:"下"},
 ];
-function drawCube(){
-  const S=220, c=S/2, R=62;
-  cg.clearRect(0,0,S,S);
-  cg.fillStyle="rgba(30,24,18,.55)"; cg.beginPath(); cg.arc(c,c,R+38,0,7); cg.fill();
-  cg.strokeStyle="rgba(200,170,110,.25)"; cg.stroke();
-  // 旋转矩阵（与主视图一致）
+function cubeRot(v){                                    // 与主相机一致的旋转
   const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
-  const rot=v=>{
-    let x=v[0]*cy+v[2]*sy, z=-v[0]*sy+v[2]*cy, y=v[1];
-    let y2=y*cp-z*sp, z2=y*sp+z*cp;
-    return [x,y2,z2];
-  };
-  // 立方体 8 顶点
-  const V=[];
-  for(const X of[-1,1])for(const Y of[-1,1])for(const Z of[-1,1])V.push({p:[X,Y,Z],r:rot([X,Y,Z])});
-  V.sort((a,b)=>a.r[2]-b.r[2]);
-  const proj=r=>[c+r[0]*R,c-r[1]*R];
-  // 面近似：画 3 个可见面
-  const axes=[rot([1,0,0]),rot([0,1,0]),rot([0,0,1])];
-  const faceDefs=[
-    {n:[0,0,1],a:axes[0],b:axes[1],col:"#8a6f4a",l:"前"},
-    {n:[1,0,0],a:axes[2],b:axes[1],col:"#6f5a3c",l:"右"},
-    {n:[0,1,0],a:axes[0],b:axes[2],col:"#a08050",l:"上"},
-  ];
-  for(const f of faceDefs){
-    const nrm=rot(f.n);
-    if(nrm[2]<=0.02) continue;
-    const ctr=[c+nrm[0]*R*.55, c-nrm[1]*R*.55];
-    const ha=R*.48, hb=R*.48;
+  const x=v[0]*cy+v[2]*sy, z0=-v[0]*sy+v[2]*cy, y0=v[1];
+  return [x, y0*cp-z0*sp, y0*sp+z0*cp];
+}
+function drawCube(){
+  const S=220, c=S/2, R=72, h=.6;                       // h=立方体半边长(单位化)
+  cg.clearRect(0,0,S,S);
+  cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,R+40,0,7); cg.fill();
+  cg.strokeStyle="rgba(90,85,78,.35)"; cg.lineWidth=2; cg.stroke();
+  const proj=r=>[c+r[0]*R, c-r[1]*R];
+  // 画 6 个面（只画朝向观察者的面，先远后近）
+  const order=FACES.map(f=>{
+    const rn=cubeRot(f.n);
+    return {f,rn,depth:rn[2]};
+  }).sort((a,b)=>a.depth-b.depth);                      // 远的先画
+  for(const {f,rn} of order){
+    if(rn[2]<.02) continue;                             // 背面跳过
+    const ru=cubeRot(f.u), rv=cubeRot(f.v);
+    const ctr=[rn[0]*h, rn[1]*h];
+    const corner=(su,sv)=>proj([ctr[0]+ru[0]*h*su+rv[0]*h*sv,
+                                ctr[1]+ru[1]*h*su+rv[1]*h*sv]);
     cg.beginPath();
-    const p1=[ctr[0]+f.a[0]*ha,ctr[1]-f.a[1]*ha], p2=[p1[0]+f.b[0]*hb,p1[1]-f.b[1]*hb], p3=[ctr[0]+f.b[0]*hb,ctr[1]-f.b[1]*hb];
-    cg.moveTo(...p1);cg.lineTo(...p2);cg.lineTo(...p3);cg.lineTo(...ctr);cg.closePath();
-    cg.fillStyle=f.col; cg.globalAlpha=.9; cg.fill(); cg.globalAlpha=1;
-    cg.strokeStyle="#2a2015"; cg.stroke();
-    cg.fillStyle="#f0e2c0"; cg.font="16px Georgia";
-    cg.textAlign="center";cg.textBaseline="middle";
-    const [tx,ty]=proj(nrm.map((v,i)=>v*1.35));
+    cg.moveTo(...corner(-1,-1)); cg.lineTo(...corner(1,-1));
+    cg.lineTo(...corner(1,1));   cg.lineTo(...corner(-1,1));
+    cg.closePath();
+    // 按朝向微调明暗，增强立体感
+    cg.fillStyle=f.col; cg.globalAlpha=.6+.4*rn[2]; cg.fill(); cg.globalAlpha=1;
+    cg.strokeStyle="#6a645c"; cg.lineWidth=1.6; cg.stroke();
+    // 面标签
+    const [tx,ty]=proj([rn[0]*h*2.6, rn[1]*h*2.6]);
+    cg.fillStyle="#4a453e"; cg.font="bold 17px Georgia";
+    cg.textAlign="center"; cg.textBaseline="middle";
     cg.fillText(f.l,tx,ty);
   }
-  for(const v of V){cg.fillStyle="#d8c49a";cg.beginPath();cg.arc(...proj(v.r),2.5,0,7);cg.fill();}
+  // 顶点
+  for(const X of[-1,1])for(const Y of[-1,1])for(const Z of[-1,1]){
+    const r=cubeRot([X,Y,Z]); if(r[2]<-.2) continue;
+    const [px,py]=proj(r);
+    cg.fillStyle="#8a847c"; cg.beginPath(); cg.arc(px,py,2.2,0,7); cg.fill();
+  }
 }
 cubeCv.addEventListener("click",e=>{
   const r=cubeCv.getBoundingClientRect();
   const mx=(e.clientX-r.left)*2, my=(e.clientY-r.top)*2;
-  const cx=110,cy=110;
-  const dx=mx-cx,dy=cy-my;
-  if(Math.hypot(dx,dy)>95) return;
-  // 按点击方位选视角（八方位 + 中心=轴测）
+  const dx=mx-110, dy=110-my;
+  if(Math.hypot(dx,dy)>100) return;
+  // 按点击方位选视角：中心=轴测，上下/左右=正交面，四角=45°对角
   let ty,tp;
-  if(Math.hypot(dx,dy)<32){ ty=.7; tp=.5; }                          // 中心：轴测
-  else if(Math.abs(dy)>Math.abs(dx)){ ty=0; tp=dy>0?Math.PI/2:-Math.PI/2; }  // 上/下
-  else { tp=0; ty=dx>0?-Math.PI/2:Math.PI/2; }                       // 左/右
+  if(Math.hypot(dx,dy)<34){ ty=.7; tp=.5; }                          // 中心：轴测
+  else if(Math.abs(dy)>Math.abs(dx)*1.6){ ty=0; tp=dy>0?Math.PI/2:-Math.PI/2; }      // 上/下
+  else if(Math.abs(dx)>Math.abs(dy)*1.6){ tp=0; ty=dx>0?-Math.PI/2:Math.PI/2; }      // 左/右
+  else if(dy>0){ ty=dx>0?-.785:.785; tp=.615; }                      // 前象限对角
+  else { ty=dx>0?-2.356:2.356; tp=.615; }                            // 后象限对角
   animCam(ty,tp);
 });
 let camAnim=null;
