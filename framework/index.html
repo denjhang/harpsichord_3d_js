@@ -64,7 +64,9 @@
 <div id="ctrl">
   <label>热床透明<input type="range" id="sl-bed" min="0" max="100" value="70"></label>
   <label>装配<input type="range" id="sl-asm" min="0" max="100" value="100"></label>
-  <label>切片<input type="range" id="sl-slice" min="0" max="270" value="270"></label>
+  <label>切片<input type="range" id="sl-slice" min="0" max="270" value="270" step="0.5">
+    <button id="sl-down" title="下移一层(0.5mm)" style="padding:2px 8px;font-size:13px">−</button>
+    <button id="sl-up" title="上移一层(0.5mm)" style="padding:2px 8px;font-size:13px">＋</button></label>
 </div>
 <div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 右上角立方体=<span>快速视角</span></div>
 <canvas id="cube" width="264" height="264" style="width:132px;height:132px"></canvas>
@@ -395,7 +397,7 @@ function stepCube(t){
 /* ================= 里拉建模（几何内核 = src/lyre.build.mjs，页面只管输入输出）================= */
 import { buildBody, buildPegs, buildStrings, buildInfill, validateModel } from "./src/lyre.build.mjs";
 let current=null, pegMesh=null, stringGroup=null, infillMesh=null, infillTimer=null;
-let solidManifolds=[];                                   // 供切片填充使用的实体
+let solidManifolds=[], solidTarget=null;                 // 切片填充用：实体列表 + 缓存的并集
 let modelText=null;                                      // 当前生效的模型 JSON 文本（单一数据源）
 const MAT_BODY=()=>new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7,side:THREE.DoubleSide});
 const MAT_PEG =()=>new THREE.MeshStandardMaterial({color:0x5c4a38,roughness:.55,metalness:.15,side:THREE.DoubleSide});
@@ -455,6 +457,7 @@ async function build(){
     parts.push("布尔检查: "+row.join(" · ")+" mm³ ✅");
   }
   solidManifolds=solids.map(s=>s.m);
+  solidTarget=solidManifolds.reduce((a,m)=>a?a.add(m):m,null);   // 并集只算一次/重建
   applyView();                                           // 重建后保持滑块状态
   refreshInfill();                                       // 切片开启时重建填充
   return parts.join("\n");
@@ -596,11 +599,19 @@ async function refreshInfill(){                          // 模拟切片：±45�
   const h=+$("sl-slice").value;
   if(infillMesh){scene.remove(infillMesh);infillMesh.geometry.dispose();infillMesh=null;}
   if(h>=269.5 || !solidManifolds.length) return;
-  const {mesh}=await buildInfill(solidManifolds,h);
+  if(!solidTarget) return;
+  const {mesh}=await buildInfill(solidTarget,h);
   infillMesh=setMesh(mesh,new THREE.MeshStandardMaterial({
     color:0xd96a2e,roughness:.75,side:THREE.DoubleSide}));
   scene.add(infillMesh);
 }
+const sliceStep=d=>{                                     // 微调一层（默认 0.5mm）
+  const e=$("sl-slice");
+  e.value=Math.max(0,Math.min(270,(+e.value+d))).toFixed(1);
+  e.dispatchEvent(new Event("input"));
+};
+$("sl-down").onclick=()=>sliceStep(-0.5);
+$("sl-up").onclick=()=>sliceStep(0.5);
 for(const id of ["sl-bed","sl-asm","sl-slice"])
   $(id).addEventListener("input",()=>{
     applyView();

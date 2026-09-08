@@ -155,21 +155,31 @@ export async function buildPegs(model){
   return { body:pegs, mesh:pegs.getMesh(),
     info:`调音柱×${g.n}  tri:${pegs.numTri()}  体积:${(pegs.volume()/1000).toFixed(1)}cm³` };
 }
-/** 模拟切片填充：在高度 h 处取各实体截面，用 ±45° 正交网格（随层高交替，仿切片器）
- *  填充实心区域。返回 { mesh, info } ——仅供显示，不影响导出。 */
-export async function buildInfill(solidsM, h, spacing=4){
-  const wasm=await W();
-  const { Manifold } = wasm;
-  const th=0.6, a=(Math.round(h/2)%2? 45:-45)*Math.PI/180, ca=Math.cos(a), sa=Math.sin(a);
+/** 模拟切片填充：在高度 h 处用 ±45° 正交网格（随层高交替，仿切片器）
+ *  填充 target 实体的截面。target=各实体的并集（调用方缓存，避免每次重算）。
+ *  柱条网格按方向缓存——拖动切片滑块时只做一次交集，不重复并集。 */
+const _gridCache={};
+function infillGrid(h, th, spacing){
+  const a=(Math.round(h/2)%2? 45:-45)*Math.PI/180;
+  const key=a*180/Math.PI+"_"+spacing;
+  if(_gridCache[key]) return _gridCache[key];
+  const { Manifold } = { Manifold: _wasm.Manifold };
+  const ca=Math.cos(a), sa=Math.sin(a);
   let grid=null;
   for(let d=-230; d<=230; d+=spacing){
     const bar=Manifold.cube([460,1.1,th],true).rotate(0,0,a*180/Math.PI)
-      .translate([-sa*d, ca*d, h+th/2]);
+      .translate([-sa*d, ca*d, 0]);
     grid=grid?grid.add(bar):bar;
   }
-  let target=null;
-  for(const m of solidsM) target=target?target.add(m):m;
+  _gridCache[key]=grid;
+  return grid;
+}
+export async function buildInfill(target, h, spacing=4){
+  const wasm=await W();
+  const th=0.6;
+  const grid=infillGrid(h, th, spacing).translate([0,0,h+th/2]);   // 缓存的网格平移到层高
   const infill=grid.intersect(target);
   if(String(infill.status())!=="NoError") throw new Error("填充线布尔异常");
-  return { mesh:infill.getMesh(), info:`填充 ${a*180/Math.PI>0?"+45°":"-45°"} spacing:${spacing}mm` };
+  const a=(Math.round(h/2)%2? 45:-45);
+  return { mesh:infill.getMesh(), info:`填充 ${a>0?"+45°":"-45°"} spacing:${spacing}mm` };
 }
