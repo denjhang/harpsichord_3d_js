@@ -1,0 +1,16 @@
+{
+  // 行星齿轮机构（测试 gear/tube 零件）
+  "meta": { "name": "planetary_gear", "units": "mm", "kind": "parts", "version": 1 },
+  "parts": [
+    { "name": "太阳轮", "type": "gear", "p": { "r": 14, "teeth": 12, "h": 8, "tooth": 3 },
+      "at": [0, 0, 4], "color": "#b8873a" },
+    { "name": "行星轮1", "type": "gear", "p": { "r": 9, "teeth": 8, "h": 8, "tooth": 2.5 },
+      "at": [26, 0, 4], "color": "#8a6a2f" },
+    { "name": "行星轮2", "type": "gear", "p": { "r": 9, "teeth": 8, "h": 8, "tooth": 2.5 },
+      "at": [-13, 22.5, 4], "color": "#8a6a2f" },
+    { "name": "行星轮3", "type": "gear", "p": { "r": 9, "teeth": 8, "h": 8, "tooth": 2.5 },
+      "at": [-13, -22.5, 4], "color": "#8a6a2f" },
+    { "name": "齿圈", "type": "tube", "p": { "ri": 37, "ro": 44, "h": 8 },
+      "at": [0, 0, 4], "color": "#5f5346" }
+  ]
+}

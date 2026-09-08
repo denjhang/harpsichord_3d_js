@@ -1,0 +1,12 @@
+{
+  // 飞机（测试横置机身/机翼/尾翼）
+  "meta": { "name": "airplane", "units": "mm", "kind": "parts", "version": 1 },
+  "parts": [
+    { "name": "机身", "type": "cyl", "p": { "r1": 6, "r2": 8, "h": 90 }, "at": [0, 0, 40], "rot": [90, 0, 0], "color": "#3b6fe0" },
+    { "name": "机头", "type": "cyl", "p": { "r1": 0.5, "r2": 6, "h": 16 }, "at": [0, 53, 40], "rot": [90, 0, 0], "color": "#e0e4ea" },
+    { "name": "主翼", "type": "box", "p": { "sx": 110, "sy": 22, "sz": 3 }, "at": [0, 4, 40], "color": "#e0e4ea" },
+    { "name": "尾翼", "type": "box", "p": { "sx": 44, "sy": 12, "sz": 2.5 }, "at": [0, -40, 42], "color": "#e0e4ea" },
+    { "name": "垂尾", "type": "box", "p": { "sx": 3, "sy": 14, "sz": 18 }, "at": [0, -44, 52], "color": "#e0392b" },
+    { "name": "驾驶舱", "type": "sphere", "p": { "r": 5.5 }, "at": [0, 30, 46], "color": "#7ac0ff" }
+  ]
+}

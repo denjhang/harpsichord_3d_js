@@ -1,0 +1,14 @@
+{
+  // 宝塔（测试圆台堆叠）
+  "meta": { "name": "pagoda", "units": "mm", "kind": "parts", "version": 1 },
+  "parts": [
+    { "name": "基座", "type": "box", "p": { "sx": 70, "sy": 70, "sz": 8 }, "at": [0, 0, 4], "color": "#8a5a3a" },
+    { "name": "一层", "type": "cyl", "p": { "r1": 30, "r2": 26, "h": 22 }, "at": [0, 0, 19], "color": "#b06a3a" },
+    { "name": "一层檐", "type": "cyl", "p": { "r1": 38, "r2": 34, "h": 5 }, "at": [0, 0, 32.5], "color": "#7a4a2a" },
+    { "name": "二层", "type": "cyl", "p": { "r1": 24, "r2": 20, "h": 18 }, "at": [0, 0, 44], "color": "#b06a3a" },
+    { "name": "二层檐", "type": "cyl", "p": { "r1": 31, "r2": 27, "h": 5 }, "at": [0, 0, 55.5], "color": "#7a4a2a" },
+    { "name": "三层", "type": "cyl", "p": { "r1": 18, "r2": 14, "h": 15 }, "at": [0, 0, 65.5], "color": "#b06a3a" },
+    { "name": "三层檐", "type": "cyl", "p": { "r1": 24, "r2": 20, "h": 5 }, "at": [0, 0, 75.5], "color": "#7a4a2a" },
+    { "name": "塔刹", "type": "sphere", "p": { "r": 7 }, "at": [0, 0, 85], "color": "#caa84a" }
+  ]
+}

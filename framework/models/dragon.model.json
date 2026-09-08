@@ -1,0 +1,20 @@
+{
+  // 龙（测试沿曲线布点：球串身体 + 角/鳍）
+  "meta": { "name": "dragon", "units": "mm", "kind": "parts", "version": 1 },
+  "parts": [
+    { "name": "头", "type": "box", "p": { "sx": 26, "sy": 18, "sz": 16 }, "at": [55, 0, 42], "rot": [0, 0, -20], "color": "#3a6a4a" },
+    { "name": "下颌", "type": "box", "p": { "sx": 18, "sy": 10, "sz": 5 }, "at": [58, 0, 32], "rot": [0, 0, -20], "color": "#2d5539" },
+    { "name": "左角", "type": "cyl", "p": { "r1": 1.5, "r2": 4, "h": 18 }, "at": [50, 7, 52], "rot": [-25, 0, -15], "color": "#caa84a" },
+    { "name": "右角", "type": "cyl", "p": { "r1": 1.5, "r2": 4, "h": 18 }, "at": [50, -7, 52], "rot": [-25, 0, -15], "color": "#caa84a" },
+    { "name": "颈", "type": "sphere", "p": { "r": 8 }, "at": [40, 2, 38], "color": "#3a6a4a" },
+    { "name": "身1", "type": "sphere", "p": { "r": 9 }, "at": [24, 8, 32], "color": "#3a6a4a" },
+    { "name": "身2", "type": "sphere", "p": { "r": 10 }, "at": [6, 8, 28], "color": "#3a6a4a" },
+    { "name": "身3", "type": "sphere", "p": { "r": 10 }, "at": [-12, 2, 26], "color": "#3a6a4a" },
+    { "name": "身4", "type": "sphere", "p": { "r": 9 }, "at": [-28, -6, 26], "color": "#3a6a4a" },
+    { "name": "尾根", "type": "sphere", "p": { "r": 7 }, "at": [-42, -12, 28], "color": "#3a6a4a" },
+    { "name": "尾尖", "type": "cyl", "p": { "r1": 0.8, "r2": 4, "h": 22 }, "at": [-58, -16, 34], "rot": [40, 0, 10], "color": "#2d5539" },
+    { "name": "背鳍1", "type": "cyl", "p": { "r1": 0.6, "r2": 4, "h": 12 }, "at": [6, 8, 40], "rot": [0, 0, 0], "color": "#caa84a" },
+    { "name": "背鳍2", "type": "cyl", "p": { "r1": 0.6, "r2": 4, "h": 12 }, "at": [-12, 2, 38], "rot": [0, 0, 0], "color": "#caa84a" },
+    { "name": "爪", "type": "box", "p": { "sx": 8, "sy": 20, "sz": 5 }, "at": [10, 0, 20], "color": "#2d5539" }
+  ]
+}

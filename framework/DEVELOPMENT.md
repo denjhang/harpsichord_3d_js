@@ -1,4 +1,6 @@
-# Lyre 轻量参数化建模框架 · 开发文档
+# Lyre 3D JS · 参数化建模框架 开发文档
+
+> 框架名：**Lyre 3D JS**。从单琴体模型进化为多文件参数化建模框架。
 
 > 定位：**最适合 AI 驱动的 3D 建模框架**——参数即 JSON，几何即代码，结果即 STL。
 > 已验证：本框架导出的 `lyre_body.stl` 可直接导入 Bambu Studio 切片（2026-09-08）。
@@ -35,7 +37,9 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 
 | 文件 | 作用 |
 |---|---|
-| `lyre.model.json` | 参数单一来源。页面内改（JSON 面板）或直接改文件后点"重建" |
+| `lyre.model.json` | 里拉琴参数（JSONC 带注释，单一来源） |
+| `models/` | 通用零件模型目录（`index.json` 清单 + `*.model.json`），启动自动加载 |
+| `models/*.model.json` | 通用 schema：`meta.kind="parts"` + `parts[{name,type,p,at,rot,color}]`；type=box/cyl/sphere/tube/gear |
 | `index.html` | 查看器 + 热床/导航立方体 UI + **模型 JSON 面板**（编辑/校验/导入/导出/回写） |
 | `src/lyre.build.mjs` | **几何内核**：`validateModel` / `buildBody(model,{pegHoles})` / `buildPegs` / `pegPositions`，与 UI 解耦，Node 可复用 |
 | `server.py` | `python framework/server.py 8765`：静态服务 + `POST /save?name=` 存 out/ + `POST /savemodel` 回写模型文件 |
@@ -162,6 +166,15 @@ await __exportSTL()                    // 导出 STL 到 out/lyre_body.stl（已
   `fitView()` 半径 = max(床半宽, 物体全高) × 1.18、窗口 resize 自动适配
 - **导出**：`STLExporter.parse(mesh)` → `fetch("/save?name=…", {method:"POST", body})`
   静默写盘，**绝不触发浏览器下载弹窗**；失败仅在 HUD 报错
+
+## 5.5 多文件与组件系统（Lyre 3D JS 核心）
+- **多文件加载**：`models/index.json` 列出清单，启动全部加载；组件按文件名 `<details>` 分组
+- **组件行**：勾选=显隐（琴弦/调音柱即时、琴体/调音孔触发重建）、✕=删除零件、每组"＋添加零件"=追加默认 box
+- **自动平铺**：每个文件按包围盒沿 X 自动排开（gap 15mm），整体居中，互不重叠
+- **自动焊接**：文件内零件互相干涉（>0.5mm³）视为"打印时熔合"，自动并成单一实体再做布尔检查——有机模型（龙）合法重叠不报错
+- **JSON 面板**：编辑的是 `activeFile`（点击分组标题切换），保存回写对应文件
+- **版本说明**：右下角显示 `GET /version`（git short hash），点击展开更新日志
+- 新增 API：`buildParts(parts)`（src/lyre.build.mjs）——通用零件构建，at=零件中心（cyl 已改为中心语义）
 
 ## 6. AI 操作手册（标准工作流）
 

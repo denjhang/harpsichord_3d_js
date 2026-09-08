@@ -183,3 +183,47 @@ export async function buildInfill(target, h, spacing=4){
   const a=(Math.round(h/2)%2? 45:-45);
   return { mesh:infill.getMesh(), info:`填充 ${a>0?"+45°":"-45°"} spacing:${spacing}mm` };
 }
+
+/* ================= 通用零件系统（多文件/任意模型）=================
+ * 零件规格：{name, type, p, at:[x,y,z], rot:[rx,ry,rz], color}
+ * type: box{sx,sy,sz} | cyl{r1,r2,h}(圆锥/圆台) | sphere{r}
+ *       | tube{ri,ro,h} | gear{r,teeth,h,tooth}（渐开线近似齿形） */
+export async function buildParts(parts){
+  const wasm=await W();
+  const { Manifold, CrossSection } = wasm;
+  const out=[];
+  for(const part of parts){
+    const p=part.p||{};
+    let m=null;
+    if(part.type==="box"){
+      m=Manifold.cube([p.sx||10,p.sy||10,p.sz||10],true);
+    }else if(part.type==="cyl"){
+      const h=p.h||10;
+      m=Manifold.cylinder(h,p.r1??p.r??5,p.r2??p.r??5).translate([0,0,-h/2]);  // at=中心
+    }else if(part.type==="sphere"){
+      m=Manifold.sphere(p.r||5);
+    }else if(part.type==="tube"){
+      const h=p.h||10;
+      m=Manifold.cylinder(h,p.ro||8,p.ro||8).translate([0,0,h/2])
+        .subtract(Manifold.cylinder(h+2,p.ri||5,p.ri||5).translate([0,0,-1]));
+    }else if(part.type==="gear"){
+      const r=p.r||20, N=p.teeth||12, th=p.h||6, tooth=p.tooth||3;
+      const pts=[];
+      for(let i=0;i<N;i++){
+        const a0=(i/N)*Math.PI*2, a1=((i+0.5)/N)*Math.PI*2, w=(a1-a0);
+        const P=(ang,rad)=>pts.push([Math.cos(ang)*rad,Math.sin(ang)*rad]);
+        P(a0,r-tooth); P(a0+w*0.35,r-tooth); P(a1-w*0.35,r); P(a1,r);
+      }
+      m=new CrossSection([pts],"NonZero").extrude(th);
+    }else{
+      throw new Error("未知零件类型: "+part.type);
+    }
+    const rot=part.rot||[0,0,0];
+    if(rot[0]||rot[1]||rot[2]) m=m.rotate(rot[0],rot[1],rot[2]);
+    const at=part.at||[0,0,0];
+    if(at[0]||at[1]||at[2]) m=m.translate(at);
+    out.push({name:part.name||part.type, body:m, mesh:m.getMesh(),
+              color:part.color||"#c8b88a"});
+  }
+  return out;
+}

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>Lyre 轻量参数化建模 · Manifold</title>
+<title>Lyre 3D JS · 参数化建模框架</title>
 <script>window.addEventListener("error",e=>{const d=document.getElementById("err");
   if(d) d.textContent="LOAD ❌ "+e.message+" @"+(e.filename||"?").split("/").pop()+":"+e.lineno;});</script>
 <style>
@@ -53,6 +53,24 @@
   body.sideClosed #sidebar{transform:translateX(-100%)}
   #sidebar #comps,#sidebar #panel{position:static;width:auto;background:none;border:none;backdrop-filter:none}
   #sidebar #comps{margin-bottom:16px}
+  #comps details{margin-bottom:8px}
+  #comps summary{color:#3a362f;font-size:12.5px;cursor:pointer;user-select:none;padding:2px 0}
+  #comps summary:hover{color:#1a1712}
+  .comprow{display:flex;align-items:center;gap:6px;color:#55504a;font-size:12.5px;padding:2px 0 2px 10px}
+  .comprow:hover{color:#1a1712;background:rgba(138,125,99,.12);border-radius:4px}
+  .comprow input{accent-color:#8a7d63;cursor:pointer}
+  .comprow .del{margin-left:auto;border:none;background:none;color:#a05545;cursor:pointer;font-size:12px;padding:0 4px}
+  .comprow .del:hover{color:#c23b2e}
+  .addbtn{margin:4px 0 0 10px;padding:2px 10px;font-size:12px;background:#efece5;
+    border:1px dashed #a89f90;border-radius:6px;color:#4a453e;cursor:pointer}
+  .addbtn:hover{background:#e5e0d4}
+  details.sumactive summary{font-weight:bold;color:#1a1712}
+  #verinfo{position:fixed;right:14px;bottom:14px;text-align:right;color:#8b857a;font-size:11.5px;
+    cursor:pointer;user-select:none;z-index:10;transform:translateZ(0)}
+  #verinfo .log{display:none;margin-top:4px;padding:8px 10px;background:rgba(250,250,250,.95);
+    border:1px solid rgba(90,85,78,.35);border-radius:8px;text-align:left;color:#55504a;
+    white-space:pre-line;max-width:340px}
+  #verinfo.open .log{display:block}
   #sidebar #panel{margin:0}
   #sideTab{position:fixed;left:244px;top:50%;transform:translateY(-50%);z-index:6;
     width:22px;height:64px;border-radius:0 8px 8px 0;background:rgba(250,250,250,.9);
@@ -79,13 +97,7 @@
 <body>
 <div id="hud"></div>
 <div id="sidebar">
-<div id="comps">
-  <h3>组件</h3>
-  <label><input type="checkbox" id="cb-body" checked>琴体</label>
-  <label><input type="checkbox" id="cb-pegHoles" checked>调音柱孔洞</label>
-  <label><input type="checkbox" id="cb-pegs" checked>调音柱体</label>
-  <label><input type="checkbox" id="cb-strings" checked>琴弦</label>
-</div>
+<div id="comps"></div>
 <div id="panel">
   <div id="ptitle"><b>模型 JSON</b> <span id="psrc"></span> <span class="dirty" id="pdirty"></span></div>
   <div id="pbody">
@@ -117,6 +129,7 @@
   <button id="fitBtn" title="最佳窗口缩放" aria-label="最佳窗口缩放">⛶</button>
 </div>
 <button id="sideTab" title="展开/收回侧边栏">‹</button>
+<div id="verinfo" title="点击展开更新日志"><span id="vertxt">Lyre 3D JS</span><div class="log" id="verlog"></div></div>
 <script type="module">
 import * as THREE from "three";
 import { STLExporter } from "three/addons/exporters/STLExporter.js";
@@ -430,19 +443,25 @@ function stepCube(t){
   drawCube();
 }
 
-/* ================= 里拉建模（几何内核 = src/lyre.build.mjs，页面只管输入输出）================= */
-import { buildBody, buildPegs, buildStrings, buildInfill, validateModel } from "./src/lyre.build.mjs";
+const $=id=>document.getElementById(id);
+/* ================= Lyre 3D JS 建模管线（多文件，内核 = src/lyre.build.mjs）================= */
+import { buildBody, buildPegs, buildStrings, buildParts, buildInfill, validateModel } from "./src/lyre.build.mjs";
 let current=null, pegMesh=null, stringGroup=null, infillMesh=null, infillTimer=null;
-let solidManifolds=[], solidTarget=null;                 // 切片填充用：实体列表 + 缓存的并集
-let modelText=null;                                      // 当前生效的模型 JSON 文本（单一数据源）
+let solidManifolds=[], solidTarget=null;
+let modelText=null;                                      // JSON 面板正在编辑的文本
+let activeFile="lyre.model.json";                        // 面板正在编辑/保存的文件
+const files=new Map();                                   // name -> {text, meshes:[], solids:[], info}
+const visMap=new Map();                                  // "file::零件" -> 是否可见
 const parseModel=t=>JSON.parse(t.split("\n")
   .map(l=>{const k=l.indexOf("//");return k<0?l:l.slice(0,k);})
   .join("\n"));
+const comp={body:true, pegs:true, pegHoles:true, strings:true};   // 里拉组件开关
+const LYRE_COMPS=[{key:"body",label:"琴体"},{key:"pegHoles",label:"调音柱孔洞"},
+                  {key:"pegs",label:"调音柱体"},{key:"strings",label:"琴弦"}];
 const MAT_BODY=()=>new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7,side:THREE.DoubleSide});
 const MAT_PEG =()=>new THREE.MeshStandardMaterial({color:0x5c4a38,roughness:.55,metalness:.15,side:THREE.DoubleSide});
 const MAT_STR =()=>new THREE.MeshStandardMaterial({color:0xb9bdc6,roughness:.35,metalness:.85,side:THREE.DoubleSide});
-const comp={body:true, pegs:true, pegHoles:true, strings:true};   // 组件清单状态
-function setMesh(m,mat){                                 // manifold mesh → three 网格
+function setMesh(m,mat){
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(new Float32Array(m.vertProperties),3));
   g.setIndex(Array.from(m.triVerts));
@@ -451,57 +470,165 @@ function setMesh(m,mat){                                 // manifold mesh → th
   mesh.castShadow = mesh.receiveShadow = true;
   return mesh;
 }
-async function build(){
-  const model=parseModel(modelText);
+const visState=(f,n)=>visMap.get(f+"::"+n)!==false;
+
+async function buildLyre(){
+  const f=files.get("lyre.model.json");
+  const model=parseModel(f.text);
   const errs=validateModel(model);
-  if(errs.length) throw new Error("模型校验失败：\n· "+errs.join("\n· "));
-  if(current){scene.remove(current);current.geometry.dispose();current=null;}
-  if(pegMesh){scene.remove(pegMesh);pegMesh.geometry.dispose();pegMesh=null;}
-  if(stringGroup){scene.remove(stringGroup);
-    stringGroup.children.forEach(s=>s.geometry.dispose());stringGroup=null;}
-  const parts=[], solids=[];   // solids: {name, m}                             // solids：可打印实体（干涉检查对象）
+  if(errs.length) throw new Error("lyre.model.json 校验失败：\n· "+errs.join("\n· "));
+  const parts=[], solids=[], meshes=[];
   if(comp.body){
     const {mesh,info,body}=await buildBody(model,{pegHoles:comp.pegHoles});
     current=setMesh(mesh,MAT_BODY());
-    current.userData.manifold=body;
-    current.visible=comp.body;
-    scene.add(current);
-    parts.push(info); solids.push({name:"琴体", m:body});
+    current.userData.manifold=body; current.userData.fileName="lyre.model.json"; current.userData.partName="琴体";
+    current.visible=comp.body; scene.add(current);
+    meshes.push(current); parts.push(info); solids.push({name:"琴体",m:body});
   }
   if(comp.pegs && model.params.pegs){
     const {mesh,info,body}=await buildPegs(model);
     pegMesh=setMesh(mesh,MAT_PEG());
-    pegMesh.userData.manifold=body;
-    pegMesh.visible=comp.pegs;
-    scene.add(pegMesh);
-    parts.push(info); solids.push({name:"调音柱", m:body});
+    pegMesh.userData.manifold=body; pegMesh.userData.fileName="lyre.model.json"; pegMesh.userData.partName="调音柱体";
+    pegMesh.visible=comp.pegs; scene.add(pegMesh);
+    meshes.push(pegMesh); parts.push(info); solids.push({name:"调音柱",m:body});
   }
   if(comp.strings && model.params.strings){
     const {body,mesh,info}=await buildStrings(model);
-    if(stringGroup){scene.remove(stringGroup);
-      stringGroup.children.forEach(s=>s.geometry.dispose());}
-    stringGroup=setMesh(mesh,MAT_STR());                 // 实体胶囊弦；视觉件，永不进 STL
-    stringGroup.userData.manifold=body;
-    stringGroup.visible=comp.strings;
-    scene.add(stringGroup);
-      parts.push(info);
-    solids.push({name:"琴弦", m:body});
+    stringGroup=setMesh(mesh,MAT_STR());
+    stringGroup.userData.manifold=body; stringGroup.userData.visual=true;
+    stringGroup.userData.fileName="lyre.model.json"; stringGroup.userData.partName="琴弦";
+    stringGroup.visible=comp.strings; scene.add(stringGroup);
+    meshes.push(stringGroup); parts.push(info); solids.push({name:"琴弦",m:body});
   }
-  /* 自动布尔检查：所有可见实体两两求交，干涉 >0.5mm³ 即报错上屏 */
-  if(solids.length>=2){
-    const row=[];
-    for(let i=0;i<solids.length;i++)for(let j=i+1;j<solids.length;j++){
-      const v=solids[i].m.intersect(solids[j].m).volume();
-      if(v>0.5) throw new Error(`布尔检查失败：${solids[i].name}×${solids[j].name} 干涉 ${v.toFixed(2)}mm³`);
-      row.push(`${solids[i].name}×${solids[j].name} ${v.toFixed(2)}`);
+  f.meshes=meshes; f.solids=solids; f.info=parts.join("\n");
+}
+
+async function buildGeneric(f){
+  const model=parseModel(f.text);
+  const list=await buildParts(model.parts||[]);
+  const meshes=[], solids=[];
+  for(const it of list){
+    const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(it.color),
+      roughness:.6,metalness:.15,side:THREE.DoubleSide});
+    const mesh=setMesh(it.mesh,mat);
+    mesh.visible=visState(f.name,it.name);
+    mesh.userData={manifold:it.body, fileName:f.name, partName:it.name};
+    scene.add(mesh); meshes.push(mesh); solids.push({name:it.name,m:it.body});
+  }
+  f.meshes=meshes; f.solids=solids; f.info="零件×"+meshes.length;
+}
+
+async function buildAll(){
+  for(const [,f] of files) for(const m of (f.meshes||[])){scene.remove(m);m.geometry.dispose();f.meshes=[];}
+  if(files.has("lyre.model.json")) await buildLyre();
+  for(const [name,f] of files) if(name!=="lyre.model.json") await buildGeneric(f);
+  const checks=[];
+  for(const [name,f] of files){
+    let sl=f.solids||[];
+    if(sl.length>=2){
+      /* 重叠零件自动焊接：打印时本就熔为一体，把互相干涉的零件并成单一实体再检查 */
+      let has=false;
+      for(let i=0;i<sl.length&&!has;i++)for(let j=i+1;j<sl.length;j++){
+        if(sl[i].m.intersect(sl[j].m).volume()>0.5){has=true;break;}
+      }
+      if(has){
+        const u=sl.reduce((a,x)=>a?a.add(x.m):x.m,null);
+        f.welded=sl.map(x=>x.name).join("+");
+        sl=[{name:"焊接体",m:u}];
+      } else f.welded=null;
     }
-    parts.push("布尔检查: "+row.join(" · ")+" mm³ ✅");
+    for(let i=0;i<sl.length;i++)for(let j=i+1;j<sl.length;j++){
+      const v=sl[i].m.intersect(sl[j].m).volume();
+      if(v>0.5) throw new Error("布尔检查失败["+name+"]："+sl[i].name+"×"+sl[j].name+" 干涉 "+v.toFixed(2)+"mm³");
+    }
+    if(sl.length>=2||f.welded) checks.push(name.split("/").pop().replace(".model.json","")+(f.welded?"(已焊接)":"")+" ✅");
   }
-  solidManifolds=solids.map(s=>s.m);
-  solidTarget=solidManifolds.reduce((a,m)=>a?a.add(m):m,null);   // 并集只算一次/重建
-  applyView();                                           // 重建后保持滑块状态
-  refreshInfill();                                       // 切片开启时重建填充
-  return parts.join("\n");
+  /* 自动平铺：按文件包围盒沿 X 排开，互不重叠、整体居中（床外也不怕，可拖看） */
+  const gap=15, boxes=[];
+  for(const [,f] of files){
+    if(!f.meshes||!f.meshes.length){boxes.push(null);continue;}
+    const b=new THREE.Box3();
+    for(const m of f.meshes) b.expandByObject(m);
+    boxes.push({f,b});
+  }
+  const widths=boxes.map(o=>o?(o.b.max.x-o.b.min.x):0);
+  const total=widths.reduce((a,b)=>a+b,0)+gap*(boxes.filter(Boolean).length-1);
+  let cur=-total/2;
+  boxes.forEach((o,i)=>{
+    if(!o) return;
+    const cx=(o.b.min.x+o.b.max.x)/2;
+    const dx=cur+widths[i]/2-cx;
+    for(const m of o.f.meshes) m.position.x+=dx;
+    cur+=widths[i]+gap;
+  });
+  const ly=files.get("lyre.model.json");
+  solidManifolds=ly?(ly.solids||[]).map(x=>x.m):[];
+  solidTarget=solidManifolds.reduce((a,m)=>a?a.add(m):m,null);
+  applyView(); refreshInfill(); renderSidebar();
+  return checks;
+}
+
+/* ---------- 侧边栏：按文件分组的组件清单（可勾选/删除/添加）---------- */
+function setEmi(mesh,on){ if(mesh&&mesh.material.emissive) mesh.material.emissive.setHex(on?0x9a5a10:0x000000); }
+function compRow(parent,label,checked,onChg,onHover,onLeave,delFn){
+  const row=document.createElement("div"); row.className="comprow";
+  const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=checked;
+  cb.onchange=onChg;
+  const sp=document.createElement("span"); sp.textContent=label;
+  row.appendChild(cb); row.appendChild(sp);
+  if(delFn){ const d=document.createElement("button"); d.className="del"; d.textContent="✕";
+    d.title="删除该组件"; d.onclick=delFn; row.appendChild(d); }
+  row.addEventListener("mouseenter",onHover); row.addEventListener("mouseleave",onLeave);
+  parent.appendChild(row);
+}
+function renderSidebar(){
+  const host=document.getElementById("comps"); host.innerHTML="";
+  for(const [name,f] of files){
+    const det=document.createElement("details"); det.open=true;
+    if(name===activeFile) det.className="sumactive";
+    const sum=document.createElement("summary"); sum.textContent=name;
+    sum.title="点击：在下方 JSON 面板编辑该文件";
+    sum.onclick=()=>{ activeFile=name; files.get(activeFile).text=f.text; ptext.value=f.text; pdirty.textContent="";
+      renderSidebar(); };
+    det.appendChild(sum);
+    if(name==="lyre.model.json"){
+      for(const c of LYRE_COMPS){
+        compRow(det,c.label,comp[c.key],
+          e=>{ comp[c.key]=e.target.checked; refresh(); },
+          ()=>setEmi(c.key==="pegs"?pegMesh:(c.key==="strings"?stringGroup:current),true),
+          ()=>setEmi(c.key==="pegs"?pegMesh:(c.key==="strings"?stringGroup:current),false));
+      }
+    }else{
+      for(const mesh of (f.meshes||[])){
+        const pn=mesh.userData.partName;
+        compRow(det,pn,mesh.visible,
+          e=>{ mesh.visible=e.target.checked;
+               visMap.set(name+"::"+pn,e.target.checked); },
+          ()=>setEmi(mesh,true), ()=>setEmi(mesh,false),
+          ()=>deletePart(name,pn));
+      }
+      const add=document.createElement("button"); add.className="addbtn"; add.textContent="＋ 添加零件";
+      add.onclick=()=>addPart(name);
+      det.appendChild(add);
+    }
+    host.appendChild(det);
+  }
+}
+function deletePart(fileName,partName){
+  const f=files.get(fileName); const model=parseModel(f.text);
+  model.parts=model.parts.filter(p=>p.name!==partName);
+  f.text=JSON.stringify(model,null,2);
+  if(activeFile===fileName){ ptext.value=f.text; files.get(activeFile).text=f.text; }
+  refresh();
+}
+function addPart(fileName){
+  const f=files.get(fileName); const model=parseModel(f.text);
+  model.parts=model.parts||[];
+  const i=model.parts.length+1;
+  model.parts.push({name:"零件"+i,type:"box",p:{sx:20,sy:20,sz:20},at:[0,0,10],color:"#c8b88a"});
+  f.text=JSON.stringify(model,null,2);
+  if(activeFile===fileName){ ptext.value=f.text; files.get(activeFile).text=f.text; }
+  refresh();
 }
 
 /* ================= 主循环 ================= */
@@ -516,143 +643,16 @@ function frame(t){
 async function refresh(){
   errBox.textContent="";
   try{
-    const parts=await build();
-    hud.textContent=`里拉琴 · Manifold 内核 ✅\n打印比例 1:1.35（240mm / 250 热床）\n${parts}`;
+    const checks=await buildAll();
+    const lines=["Lyre 3D JS · Manifold 内核 ✅"];
+    for(const [name,f] of files) lines.push("【"+name+"】"+(f.info||""));
+    hud.textContent=lines.join("\n")+"布尔检查: "+(checks.join(" · ")||"（单文件无对检）");
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
 }
 document.getElementById("rebuild").onclick=refresh;
 
-/* 组件悬停联动：3D 高亮 + JSON 对应参数段选中定位 */
-const PART2KEY={body:"outline",pegHoles:"pegHoles",pegs:"pegs",strings:"strings"};
-const PART2MESH=()=>({body:current,pegs:pegMesh,strings:stringGroup});
-function highlightJSON(key){
-  const t=ptext.value, i=t.indexOf('"'+key+'"');
-  if(i<0) return;
-  let depth=0,j=i;
-  for(;j<t.length;j++){                       // 找到该键对应块的结束括号
-    if(t[j]==="{")depth++;
-    else if(t[j]==="}"){depth--; if(depth===0){j++;break;}}
-    else if(t[j]==="]"&&key==="outline"){depth--; if(depth===0){j++;break;}}
-  }
-  ptext.focus();
-  ptext.setSelectionRange(i,j);
-  const line=t.slice(0,i).split("\n").length;
+/* 悬停联动已内建于 renderSidebar 的组件行 */
 
-  ptext.scrollTop=Math.max(0,(line-4)*18);    // 12px*1.5 行高，目标行滚到中部
-}
-function setHighlight(part,on){
-  const m=PART2MESH()[part];
-  if(m&&m.material.emissive) m.material.emissive.setHex(on?0x9a5a10:0x000000);
-}
-for(const [part,label] of Object.entries({body:"琴体",pegHoles:"调音柱孔洞",pegs:"调音柱体",strings:"琴弦"})){
-  const row=[...document.querySelectorAll("#comps label")]
-    .find(l=>l.textContent.includes(label));
-  if(!row) continue;
-  row.addEventListener("mouseenter",()=>setHighlight(part,true));
-  row.addEventListener("mouseleave",()=>setHighlight(part,false));
-}
-
-/* 组件清单：琴体/调音孔改动几何需重建，调音柱/琴弦只切可见性 */
-const REBUILD_ON={pegHoles:true, body:true};             // 影响几何的开关
-for(const key of ["body","pegHoles","pegs","strings"]){
-  document.getElementById("cb-"+key).addEventListener("change",e=>{
-    comp[key]=e.target.checked;
-    if(REBUILD_ON[key]) refresh();
-    else{
-      const m=key==="pegs"?pegMesh:stringGroup;
-      if(m) m.visible=comp[key];
-      hud.textContent=(comp[key]?"✅ 显示 ":"⬜ 隐藏 ")+
-        {pegs:"调音柱",strings:"琴弦"}[key]+
-        "（导出 STL 时同样排除隐藏件）";
-    }
-  });
-}
-
-/* ================= 模型 JSON 面板：导入 / 导出 / 校验 / 回写 ================= */
-const $=id=>document.getElementById(id);
-const ptext=$("ptext"), pdirty=$("pdirty");
-const silentSave=async(name,data)=>{                     // 统一走服务器静默存盘，绝不弹窗
-  const r=await fetch("/save?name="+encodeURIComponent(name),{method:"POST",body:data});
-  if(!r.ok) throw new Error("HTTP "+r.status);
-  return r.json();
-};
-ptext.addEventListener("input",()=>{
-  pdirty.textContent = ptext.value!==modelText ? "（未应用修改）" : "";
-});
-$("apply").onclick=()=>applyModelText(ptext.value);      // 与 AI 接口共用同一入口
-$("importFile").onclick=()=>$("filein").click();
-$("filein").addEventListener("change",async e=>{
-  const f=e.target.files[0]; if(!f) return;
-  try{
-    modelText=await f.text(); ptext.value=modelText; pdirty.textContent="";
-    $("psrc").textContent="← "+f.name; refresh();
-  }catch(err){ errBox.textContent="❌ 读取文件失败："+err.message; }
-  e.target.value="";
-});
-$("saveModel").onclick=async()=>{
-  modelText=ptext.value; pdirty.textContent="";
-  try{
-    const r=await fetch("/savemodel",{method:"POST",body:modelText});   // 回写 framework/lyre.model.json
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    const j=await r.json();
-    $("psrc").textContent=""; hud.textContent="✅ 模型 JSON 已回写："+j.saved;
-  }catch(e){ hud.textContent="❌ 回写失败（需用 framework/server.py 启动服务）："+e.message; }
-};
-$("exportCopy").onclick=async()=>{
-  try{
-    const stamp=new Date().toISOString().replace(/[:T]/g,"-").slice(0,19);
-    const j=await silentSave(`lyre_${stamp}.model.json`,ptext.value);
-    hud.textContent="✅ 副本已导出："+j.saved;
-  }catch(e){ hud.textContent="❌ 导出失败："+e.message; }
-};
-$("ptitle").onclick=()=>$("panel").classList.toggle("collapsed");
-$("sideTab").onclick=()=>{
-  const closed=document.body.classList.toggle("sideClosed");
-  $("sideTab").textContent=closed?"›":"‹";
-};
-
-/* 视角快捷按钮（任意状态单点生效）。参考构图：目标物水平投影占窗口约 63%（用户参考图）。
-   ⌂ 默认视角 = 角度复位 + 中心点(热床面与物体中点) + 距离（以热床为构图基准）
-   ⛶ 最佳缩放 = 角度不动，只调中心点(物体包围盒中心) + 距离（以物体为构图基准） */
-const REF_FRAC=0.63;
-const projExt=size=>{                                    // 包围盒的屏幕水平/垂直投影尺寸(z-up)
-  const sp=Math.abs(Math.sin(pitch)), cp=Math.abs(Math.cos(pitch));
-  const sy=Math.abs(Math.sin(yaw)),   cy=Math.abs(Math.cos(yaw));
-  return { h:size.x*sy+size.y*cy,
-           v:size.x*sp*sy+size.y*sp*cy+size.z*cp };
-};
-/* 以 target 为画面中心，对热床+物体的每个角点做屏幕投影，
-   距离同时满足：水平占窗 REF_FRAC、垂直留 8% 边距——任何内容都不出屏 */
-const fitDistOf=(boxes,target)=>{
-  const fV=camera.fov*Math.PI/180, fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
-  const sy=Math.sin(yaw), cy=Math.cos(yaw), sp=Math.sin(pitch), cp=Math.cos(pitch);
-  let mx=0, my=0;
-  for(const b of boxes){
-    for(let i=0;i<8;i++){
-      const rel=new THREE.Vector3(
-        (i&1?b.size.x:-b.size.x)/2, (i&2?b.size.y:-b.size.y)/2, (i&4?b.size.z:-b.size.z)/2)
-        .add(b.center).sub(target);
-      mx=Math.max(mx, Math.abs(rel.x*cy-rel.y*sy));
-      my=Math.max(my, Math.abs(rel.x*(-sp*sy)+rel.y*(-sp*cy)+rel.z*cp));
-    }
-  }
-  return Math.max(mx/(REF_FRAC*Math.tan(fH/2)), my/(0.92*Math.tan(fV/2)));
-};
-const BED_BOX=()=>({center:new THREE.Vector3(0,0,0),   size:new THREE.Vector3(250,250,3)});
-const sceneBoxes=()=>{                                   // 热床 + 物体（兜底盒，绝不静默失效）
-  const arr=[BED_BOX()];
-  if(current){
-    const b=new THREE.Box3().setFromObject(current);
-    arr.push({center:b.getCenter(new THREE.Vector3()), size:b.getSize(new THREE.Vector3())});
-  } else arr.push({center:new THREE.Vector3(0,BODY_TOP/2,0), size:new THREE.Vector3(180,BODY_TOP,1)});
-  return arr;
-};
-$("homeBtn").onclick=()=>{
-  animCam(DEF_VIEW.yaw, DEF_VIEW.pitch, DEF_VIEW.roll, {
-    target:new THREE.Vector3(0,BODY_TOP/4,0),
-    dist:fitDistOf(sceneBoxes(), new THREE.Vector3(0,BODY_TOP/4,0)),
-  });
-};
 /* 底部滑块：热床透明 / 装配-解体 / 模拟切片 */
 const clipPlane=new THREE.Plane(new THREE.Vector3(0,0,-1),270);   // 保留 z ≤ h
 const cutVis=new THREE.Mesh(new THREE.PlaneGeometry(265,265),
@@ -708,7 +708,7 @@ const applyModelText=async(text)=>{                      // 校验+生效+重建
     const errs=validateModel(parseModel(text));
     if(errs.length) return {ok:false, errors:errs};
   }catch(e){ return {ok:false, errors:["JSON 解析失败："+e.message]}; }
-  modelText=text; ptext.value=text; pdirty.textContent="";
+  files.get(activeFile).text=text; ptext.value=text; pdirty.textContent="";
   errBox.textContent="";
   try{
     const msg=await build();
@@ -717,8 +717,8 @@ const applyModelText=async(text)=>{                      // 校验+生效+重建
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); return {ok:false, errors:[String(e.message||e)]}; }
 };
 window.__model={
-  get:()=>modelText,                                     // 当前生效的模型 JSON 文本
-  validate:(text)=>{ try{return validateModel(parseModel(text??modelText));}
+  get:()=>files.get(activeFile).text,                                     // 当前生效的模型 JSON 文本
+  validate:(text)=>{ try{return validateModel(parseModel(text??files.get(activeFile).text));}
                     catch(e){return ["JSON 解析失败："+e.message];} },
   set:(text)=>applyModelText(typeof text==="string"?text:JSON.stringify(text,null,2)),
   load:async(name="lyre.model.json")=>{                  // 从服务器目录载入并重建
@@ -728,7 +728,7 @@ window.__model={
   },
   save:async()=>{                                        // 回写 framework/lyre.model.json
     try{
-      const r=await fetch("/savemodel",{method:"POST",body:modelText});
+      const r=await fetch("/savemodel?name="+encodeURIComponent(activeFile),{method:"POST",body:files.get(activeFile).text});
       if(!r.ok) throw new Error("HTTP "+r.status);
       const j=await r.json(); return {ok:true, saved:j.saved};
     }catch(e){ return {ok:false, errors:[String(e.message||e)]}; }
@@ -736,18 +736,20 @@ window.__model={
   exportCopy:async(name)=>{                              // 导出带时间戳副本到 out/
     try{
       const stamp=new Date().toISOString().replace(/[:T]/g,"-").slice(0,19);
-      const j=await silentSave(name||`lyre_${stamp}.model.json`,modelText);
+      const j=await silentSave(name||`lyre_${stamp}.model.json`,files.get(activeFile).text);
       return {ok:true, saved:j.saved};
     }catch(e){ return {ok:false, errors:[String(e.message||e)]}; }
   },
 };
 Object.defineProperty(window.__model,"json",{            // 便捷：直接取/存对象形式
-  get:()=>parseModel(modelText),
+  get:()=>parseModel(files.get(activeFile).text),
   set:(o)=>applyModelText(JSON.stringify(o,null,2)),
 });
 
 window.__exportSTL=async()=>{
-  const printable=[current,pegMesh].filter(m=>m&&m.visible);   // 琴弦非打印件，永不导出
+  const printable=[];
+  for(const [,f] of files) for(const m of (f.meshes||[]))
+    if(m.visible&&!m.userData.visual) printable.push(m);   // 琴弦(userData.visual)永不导出
   if(!printable.length){ hud.textContent="⬜ 没有可见的可打印组件（琴体/调音柱）"; return; }
   const holder=new THREE.Group();                        // 本版本 STLExporter 需要 Object3D
   for(const m of printable) holder.add(m);
@@ -768,12 +770,31 @@ addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updat
 fitView(); applyCam();
 window.__view = { get camera(){return camera;}, get scene(){return scene;}, get current(){return current;},
   Raycaster: THREE.Raycaster, Vector3: THREE.Vector3 };
-(async()=>{                                              // 启动：载入模型 JSON 到面板，再首建
+(async()=>{                                              // 启动：载入全部模型文件再首建
   try{
-    modelText = await (await fetch("./lyre.model.json?v="+Date.now())).text();
-    ptext.value = modelText;
-  }catch(e){ errBox.textContent="❌ 模型 JSON 载入失败："+e.message; }
-  refresh();
+    files.set("lyre.model.json",{text:await (await fetch("./lyre.model.json?v="+Date.now())).text(),meshes:[],solids:[]});
+    try{
+      const idx=await (await fetch("./models/index.json?v="+Date.now())).json();
+      for(const fn of idx.files){
+        const r=await fetch("./models/"+fn+"?v="+Date.now());
+        if(r.ok) files.set("models/"+fn,{text:await r.text(),meshes:[],solids:[]});
+      }
+    }catch(e){}
+    await refresh();
+  }catch(e){ errBox.textContent="启动失败："+(e.stack||e.message); }
+  try{
+    const v=await (await fetch("/version")).json();
+    document.getElementById("vertxt").textContent="Lyre 3D JS · git "+v.version;
+    document.getElementById("verlog").textContent=[
+      "git "+v.version,
+      "多文件加载：models/ 目录按文件分组，组件可勾选/增删",
+      "通用零件：box / cyl / sphere / tube / gear",
+      "自动布尔检查矩阵 + 模拟切片±45°填充",
+      "模型JSON全字段中文注释(JSONC) + 悬停高亮",
+      "真实阴影 / 共振腔 / 调音柱 / 琴弦走线"
+    ].join("\n");
+  }catch(e){}
+  document.getElementById("verinfo").onclick=()=>document.getElementById("verinfo").classList.toggle("open");
 })();
 requestAnimationFrame(frame);
 </script>
