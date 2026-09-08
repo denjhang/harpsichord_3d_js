@@ -8,7 +8,7 @@
 <style>
   html{margin:0;height:100%;overflow:hidden;font-family:Georgia,serif;background:#dfe1e4;user-select:none;touch-action:none}
   body{margin:0;height:100%;overflow:hidden;user-select:none;touch-action:none;background:transparent}
-  canvas.view{position:fixed;inset:0;z-index:-1;cursor:grab}
+  canvas.view{position:fixed;inset:0;z-index:0;cursor:grab}
     canvas.view.dragging{cursor:grabbing}
   #hud{position:fixed;top:16px;left:20px;color:#5a554e;opacity:.92;font-size:13px;line-height:1.8;pointer-events:none;white-space:pre}
   #hud b{color:#3a362f;font-size:16px;letter-spacing:2px}
@@ -548,7 +548,7 @@ for(const [part,label] of Object.entries({body:"琴体",pegHoles:"调音柱孔�
   const row=[...document.querySelectorAll("#comps label")]
     .find(l=>l.textContent.includes(label));
   if(!row) continue;
-  row.addEventListener("mouseenter",()=>{setHighlight(part,true);highlightJSON(PART2KEY[part]);});
+  row.addEventListener("mouseenter",()=>setHighlight(part,true));
   row.addEventListener("mouseleave",()=>setHighlight(part,false));
 }
 
