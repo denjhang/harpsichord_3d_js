@@ -79,7 +79,7 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 |---|---|
 | 热床透明 | bedMats 逐材质 opacity（0=全透明看穿床底） |
 | 装配 | t=1 装配到位 / t=0 解体：调音柱 +90mm、琴弦 +170mm 悬浮（BOM 装配动画，纯 position 不影响布尔） |
-| 模拟切片 | `renderer.localClippingEnabled` + 剖切平面保留 z≤h；只剖模型不剖热床；红色半透明面指示当前层高；材质 DoubleSide 才能看进内壁 |
+| 模拟切片 | `renderer.localClippingEnabled` + 剖切平面保留 z≤h；只剖模型不剖热床；停手 180ms 后在层高处重建 **±45° 正交填充线**（随层高交替方向，仿切片器；`buildInfill()`=柱条网格 ∩ 实体，橙色显示）——实心区有网格、空腔区透明，一眼分清 |
 
 ### 自动布尔检查（每次重建必跑）
 - 所有可见实体（琴体/调音柱/琴弦）**两两 `intersect().volume()`**，>0.5mm³ 即抛错上屏
@@ -112,7 +112,8 @@ await __exportSTL()                    // 导出 STL 到 out/lyre_body.stl（已
     "thickness": 20.7,      // 厚度
     "wall": 2.4,            // 抽壳壁厚
     "soundHole":  { "y": 8.6, "r": 18.5, "cy": -56.5 },        // mm（已换算）
-    "stringHoles":{ "cy": -101.5, "r": 2.2, "n": 7, "gap": 11.4 },
+    "stringHoles":{ "cy": -106, "r": 2.2, "n": 7, "gap": 11.4 },
+    "cavity":     { "cx": 0, "cy": -56.5, "r": 48 },   // 空腔=音孔周围一圈密闭腔，其余 100% 实心
     "bridge":     { "w": 81, "d": 7.4, "h": 6, "y": -98, "z": 20.7 },
     "window":     { "cx": 0, "cy": 46.9, "rx": 34.0, "ry": 47.3, "SAMPLE": 48 }
   },

@@ -75,11 +75,11 @@ export async function buildBody(model, opts={}){
   const outer=new CrossSection([pts,win],"NonZero");
   let body=outer.extrude(p.thickness);
   if(p.cavity){
-    /* 共振腔限定在下半部（params.cavity.top 以下）：其余琴体保持实心
-       （顶部横梁束弦、琴柱孔区需要强度）。内腔四壁+上下留 wall 壁厚。 */
+    /* 空腔=音孔周围一小圈密闭腔（params.cavity{cx,cy,r}），其余琴体 100% 实心
+       （品条下方、穿弦孔区、横梁束弦区都保持实心）。腔壁上下左右均留 wall。 */
     const inner=outer.offset(-p.wall,"Round").extrude(p.thickness-2*p.wall).translate([0,0,p.wall]);
-    const region=Manifold.cube([320,160,p.thickness])
-      .translate([-160,-160,p.wall]);                     // y: -160 → 0（y>0 区域不挖空）
+    const region=Manifold.cylinder(p.thickness,p.cavity.r,p.cavity.r)
+      .translate([p.cavity.cx||0, p.cavity.cy||0, p.wall]);
     body=body.subtract(inner.intersect(region));
   }
   const holes=[Manifold.cylinder(p.thickness+2,p.soundHole.r,p.soundHole.r).translate([0,p.soundHole.cy,-1])];
@@ -150,4 +150,22 @@ export async function buildPegs(model){
   if(String(pegs.status())!=="NoError") throw new Error("调音柱布尔异常: status="+pegs.status());
   return { body:pegs, mesh:pegs.getMesh(),
     info:`调音柱×${g.n}  tri:${pegs.numTri()}  体积:${(pegs.volume()/1000).toFixed(1)}cm³` };
+}
+/** 模拟切片填充：在高度 h 处取各实体截面，用 ±45° 正交网格（随层高交替，仿切片器）
+ *  填充实心区域。返回 { mesh, info } ——仅供显示，不影响导出。 */
+export async function buildInfill(solidsM, h, spacing=4){
+  const wasm=await W();
+  const { Manifold } = wasm;
+  const th=0.6, a=(Math.round(h/2)%2? 45:-45)*Math.PI/180, ca=Math.cos(a), sa=Math.sin(a);
+  let grid=null;
+  for(let d=-230; d<=230; d+=spacing){
+    const bar=Manifold.cube([460,1.1,th],true).rotate(0,0,a*180/Math.PI)
+      .translate([-sa*d, ca*d, h+th/2]);
+    grid=grid?grid.add(bar):bar;
+  }
+  let target=null;
+  for(const m of solidsM) target=target?target.add(m):m;
+  const infill=grid.intersect(target);
+  if(String(infill.status())!=="NoError") throw new Error("填充线布尔异常");
+  return { mesh:infill.getMesh(), info:`填充 ${a*180/Math.PI>0?"+45°":"-45°"} spacing:${spacing}mm` };
 }

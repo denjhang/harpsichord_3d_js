@@ -393,8 +393,9 @@ function stepCube(t){
 }
 
 /* ================= 里拉建模（几何内核 = src/lyre.build.mjs，页面只管输入输出）================= */
-import { buildBody, buildPegs, buildStrings, validateModel } from "./src/lyre.build.mjs";
-let current=null, pegMesh=null, stringGroup=null;
+import { buildBody, buildPegs, buildStrings, buildInfill, validateModel } from "./src/lyre.build.mjs";
+let current=null, pegMesh=null, stringGroup=null, infillMesh=null, infillTimer=null;
+let solidManifolds=[];                                   // 供切片填充使用的实体
 let modelText=null;                                      // 当前生效的模型 JSON 文本（单一数据源）
 const MAT_BODY=()=>new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7,side:THREE.DoubleSide});
 const MAT_PEG =()=>new THREE.MeshStandardMaterial({color:0x5c4a38,roughness:.55,metalness:.15,side:THREE.DoubleSide});
@@ -453,6 +454,9 @@ async function build(){
     }
     parts.push("布尔检查: "+row.join(" · ")+" mm³ ✅");
   }
+  solidManifolds=solids.map(s=>s.m);
+  applyView();                                           // 重建后保持滑块状态
+  refreshInfill();                                       // 切片开启时重建填充
   return parts.join("\n");
 }
 
@@ -588,8 +592,22 @@ function applyView(){
     if(o) o.material.clippingPlanes=on?[clipPlane]:null; // 只剖模型，不剖热床
   cutVis.position.z=h; cutVis.visible=on;
 }
+async function refreshInfill(){                          // 模拟切片：±45° 正交填充
+  const h=+$("sl-slice").value;
+  if(infillMesh){scene.remove(infillMesh);infillMesh.geometry.dispose();infillMesh=null;}
+  if(h>=269.5 || !solidManifolds.length) return;
+  const {mesh}=await buildInfill(solidManifolds,h);
+  infillMesh=setMesh(mesh,new THREE.MeshStandardMaterial({
+    color:0xd96a2e,roughness:.75,side:THREE.DoubleSide}));
+  scene.add(infillMesh);
+}
 for(const id of ["sl-bed","sl-asm","sl-slice"])
-  $(id).addEventListener("input",applyView);
+  $(id).addEventListener("input",()=>{
+    applyView();
+    clearTimeout(infillTimer);
+    infillTimer=setTimeout(()=>refreshInfill().catch(e=>{
+      errBox.textContent="INFILL ❌ "+(e.stack||e.message);}),180);
+  });
 
 $("fitBtn").onclick=()=>{
   const boxes=sceneBoxes();
