@@ -1,30 +1,28 @@
-/* 里拉竖琴 · Chili3D 程序化建模驱动脚本
- * 用法：Chili3D 页面控制台粘贴执行（返回 Promise），或自动化 evaluate 执行。
- * 参数集中在 LYRE，改完重跑即可。单位：mm。 */
+/* 里拉竖琴 · Chili3D 程序化建模驱动脚本（无布尔版：孔做在轮廓面内）
+ * 用法：Chili3D 页面控制台粘贴执行，或自动化 evaluate。单位 mm。 */
 (async () => {
   const { app, Transaction, EditableShapeNode, shapeFactory, XYZ } = window.__chili;
   const { ShapeTypes } = window.Chili3dCore;
   const doc = app.activeView && app.activeView.document;
-  if (!doc) throw new Error("请先新建文档 (doc.new)");
+  if (!doc) throw new Error("请先新建文档 (PubSub: doc.new)");
 
   const LYRE = {
-    H: 240,        // 琴体总高（原物 325cm × 打印比例 0.7385）
+    H: 240,        // 琴体总高
     TH: 20.7,      // 厚度
     WALL: 2.4,     // 抽壳壁厚
-    soundHole: { cy: 8.6, r: 2.5 },            // 圆音孔：轮廓 y 坐标(cm) + 半径(cm)
-    stringHoles: { cy: 2.5, r: 0.3, n: 7, gap: 1.55 }, // 穿弦孔
-    SAMPLE: 24,    // 每段贝塞尔采样数
+    soundHole: { cy: 8.6, r: 2.5 },
+    stringHoles: { cy: 2.5, r: 0.3, n: 7, gap: 1.55 },
+    SAMPLE: 24,
   };
-  const K = LYRE.H / 32.5;                       // cm → mm
+  const K = LYRE.H / 32.5;
   const X = v => v * K;
-  const Y = v => (v - 16.25) * K;                // 轮廓 y 居中
+  const Y = v => (v - 16.25) * K;
 
   const bez = (p0, p1, p2, p3, t) => {
     const u = 1 - t;
     return [u*u*u*p0[0] + 3*u*u*t*p1[0] + 3*u*t*t*p2[0] + t*t*t*p3[0],
             u*u*u*p0[1] + 3*u*u*t*p1[1] + 3*u*t*t*p2[1] + t*t*t*p3[1]];
   };
-  // 轮廓：与 lyre_simulator.html 同源的三次贝塞尔链（cm）
   const segs = [
     [3.2,.6, 6.4,1.6, 8.2,3.6],    [10.6,6.4, 10.9,10.8, 8.9,14.2],
     [7.6,16.4, 6.3,17.6, 6.1,19.6],[5.9,22.4, 7.3,24.4, 7.8,27.0],
@@ -44,34 +42,35 @@
     cur = p3;
   }
 
-  const wire = shapeFactory.polygon(pts).value;
-  const face = shapeFactory.face([wire]).value;
-  let solid = shapeFactory.prism(face, new XYZ({ x: 0, y: 0, z: LYRE.TH })).value;
-
-  // 孔：圆音孔 + 7 穿弦孔
-  const holes = [shapeFactory.cylinder(new XYZ({ x: 0, y: 0, z: 1 }),
-    new XYZ({ x: X(0), y: Y(LYRE.soundHole.cy), z: -LYRE.TH / 2 }),
-    LYRE.soundHole.r * K, LYRE.TH * 2).value];
+  const outer = shapeFactory.polygon(pts).value;
+  const circles = [];
+  const addCircle = (cx, cy, r) =>
+    circles.push(shapeFactory.wire([shapeFactory.circle({ x: 0, y: 0, z: 1 },
+      { x: X(cx), y: Y(cy), z: 0 }, r).value]).value);
+  addCircle(0, LYRE.soundHole.cy, LYRE.soundHole.r * K);
   const st = LYRE.stringHoles, x0 = -(st.n - 1) / 2 * st.gap;
-  for (let i = 0; i < st.n; i++)
-    holes.push(shapeFactory.cylinder(new XYZ({ x: 0, y: 0, z: 1 }),
-      new XYZ({ x: X(x0 + i * st.gap), y: Y(st.cy), z: -LYRE.TH / 2 }),
-      st.r * K, LYRE.TH * 2).value);
-  solid = shapeFactory.booleanCut([solid], holes).value;
+  for (let i = 0; i < st.n; i++) addCircle(x0 + i * st.gap, st.cy, st.r * K);
 
-  // 抽壳：选最高面（顶面）向内负壁厚
+  const face = shapeFactory.face([outer, ...circles]).value;   // 内圈自动反向成孔
+  const solid = shapeFactory.prism(face, new XYZ({ x: 0, y: 0, z: LYRE.TH })).value;
+
+  // 抽壳：找最高面（顶面）
   let top = null, tz = -1e9;
   for (const f of solid.findSubShapes(ShapeTypes.face)) {
     const bb = f.boundingBox();
     const zm = (bb.max.z + bb.min.z) / 2;
     if (zm > tz) { tz = zm; top = f; }
   }
-  let res = shapeFactory.makeThickSolidBySimple(top, -LYRE.WALL);
-  let mode = "shell";
-  if (!res.isOk) { console.warn("抽壳失败，回退实心:", res.error); res = { value: solid }; mode = "solid"; }
+  let res = shapeFactory.makeThickSolidByJoin(solid, [top], -LYRE.WALL, "arc");
+  let mode = "join-inward";
+  if (!res.isOk) { res = shapeFactory.makeThickSolidByJoin(solid, [top], LYRE.WALL, "arc"); mode = "join-outward"; }
+  if (!res.isOk) throw new Error("抽壳失败: " + res.error);
 
   const node = new EditableShapeNode({ document: doc, name: "LyreBody", shape: res.value });
   Transaction.execute(doc, "create lyre body", () => { doc.modelManager.addNode(node); });
   doc.visual.update();
-  return { mode, faces: 0 };
+  const bb = node.boundingBox();
+  return { mode,
+    bb: { min: { x: +bb.min.x.toFixed(1), y: +bb.min.y.toFixed(1), z: +bb.min.z.toFixed(1) },
+          max: { x: +bb.max.x.toFixed(1), y: +bb.max.y.toFixed(1), z: +bb.max.z.toFixed(1) } } };
 })();
