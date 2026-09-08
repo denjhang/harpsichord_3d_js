@@ -114,7 +114,7 @@ await __exportSTL()                    // 导出 STL 到 out/lyre_body.stl（已
   "params": {
     "height": 240,          // 琴体总高（打印比例 1:1.35，适配 250 热床）
     "thickness": 20.7,      // 厚度
-    "wall": 2.4,            // 抽壳壁厚
+    "wall": 3.2,            // 腔体壁厚（≥3mm 保证打印强度）
     "soundHole":  { "y": 8.6, "r": 18.5, "cy": -56.5 },        // mm（已换算）
     "stringHoles":{ "cy": -106, "r": 2.2, "n": 7, "gap": 11.4 },
     "cavity":     { "cx": 0, "cy": -56.5, "r": 48 },   // 空腔=音孔周围一圈密闭腔，其余 100% 实心
@@ -150,6 +150,9 @@ await __exportSTL()                    // 导出 STL 到 out/lyre_body.stl（已
 - **导航立方体**：真 3D 投影六面体，面/棱/角可点击切视角；环绕三角箭头 ±45°；
   弯箭头滚转 ±30°（camera.up 支持 roll）；右下小立方=切换轴十字
   ⚠️ 投影竖直分量取 `r[1]`（深度是 r[2]，抄错会只画一半）
+- **光影**：DirectionalLight castShadow（2048 shadowmap，覆盖 ±260）+ PCFSoft；全部模型网格
+  castShadow/receiveShadow → 腔体内壁无直射自然变暗；AmbientLight 压到 0.28（高环境光会把
+  腔内"提亮"导致假真）+ Hemisphere 0.3；热床 receiveShadow
 - **相机**：`target`（H5 要点：热床面与物体中心的中点 = BODY_TOP/4）、
   `fitView()` 半径 = max(床半宽, 物体全高) × 1.18、窗口 resize 自动适配
 - **导出**：`STLExporter.parse(mesh)` → `fetch("/save?name=…", {method:"POST", body})`

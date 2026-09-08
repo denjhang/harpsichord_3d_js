@@ -7,7 +7,7 @@
   "params": {
     "height": 240,
     "thickness": 20.7,
-    "wall": 2.4,
+    "wall": 3.2,
     "soundHole": {
       "y": 8.6,
       "r": 18.5,
