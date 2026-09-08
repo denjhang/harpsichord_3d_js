@@ -435,6 +435,9 @@ import { buildBody, buildPegs, buildStrings, buildInfill, validateModel } from "
 let current=null, pegMesh=null, stringGroup=null, infillMesh=null, infillTimer=null;
 let solidManifolds=[], solidTarget=null;                 // 切片填充用：实体列表 + 缓存的并集
 let modelText=null;                                      // 当前生效的模型 JSON 文本（单一数据源）
+const parseModel=t=>JSON.parse(t.split("\n")
+  .map(l=>{const k=l.indexOf("//");return k<0?l:l.slice(0,k);})
+  .join("\n"));
 const MAT_BODY=()=>new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7,side:THREE.DoubleSide});
 const MAT_PEG =()=>new THREE.MeshStandardMaterial({color:0x5c4a38,roughness:.55,metalness:.15,side:THREE.DoubleSide});
 const MAT_STR =()=>new THREE.MeshStandardMaterial({color:0xb9bdc6,roughness:.35,metalness:.85,side:THREE.DoubleSide});
@@ -449,7 +452,7 @@ function setMesh(m,mat){                                 // manifold mesh → th
   return mesh;
 }
 async function build(){
-  const model=JSON.parse(modelText);
+  const model=parseModel(modelText);
   const errs=validateModel(model);
   if(errs.length) throw new Error("模型校验失败：\n· "+errs.join("\n· "));
   if(current){scene.remove(current);current.geometry.dispose();current=null;}
@@ -518,6 +521,36 @@ async function refresh(){
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
 }
 document.getElementById("rebuild").onclick=refresh;
+
+/* 组件悬停联动：3D 高亮 + JSON 对应参数段选中定位 */
+const PART2KEY={body:"outline",pegHoles:"pegHoles",pegs:"pegs",strings:"strings"};
+const PART2MESH=()=>({body:current,pegs:pegMesh,strings:stringGroup});
+function highlightJSON(key){
+  const t=ptext.value, i=t.indexOf('"'+key+'"');
+  if(i<0) return;
+  let depth=0,j=i;
+  for(;j<t.length;j++){                       // 找到该键对应块的结束括号
+    if(t[j]==="{")depth++;
+    else if(t[j]==="}"){depth--; if(depth===0){j++;break;}}
+    else if(t[j]==="]"&&key==="outline"){depth--; if(depth===0){j++;break;}}
+  }
+  ptext.focus();
+  ptext.setSelectionRange(i,j);
+  const line=t.slice(0,i).split("\n").length;
+
+  ptext.scrollTop=Math.max(0,(line-4)*18);    // 12px*1.5 行高，目标行滚到中部
+}
+function setHighlight(part,on){
+  const m=PART2MESH()[part];
+  if(m&&m.material.emissive) m.material.emissive.setHex(on?0x9a5a10:0x000000);
+}
+for(const [part,label] of Object.entries({body:"琴体",pegHoles:"调音柱孔洞",pegs:"调音柱体",strings:"琴弦"})){
+  const row=[...document.querySelectorAll("#comps label")]
+    .find(l=>l.textContent.includes(label));
+  if(!row) continue;
+  row.addEventListener("mouseenter",()=>{setHighlight(part,true);highlightJSON(PART2KEY[part]);});
+  row.addEventListener("mouseleave",()=>setHighlight(part,false));
+}
 
 /* 组件清单：琴体/调音孔改动几何需重建，调音柱/琴弦只切可见性 */
 const REBUILD_ON={pegHoles:true, body:true};             // 影响几何的开关
@@ -672,7 +705,7 @@ $("fitBtn").onclick=()=>{
 /* AI 直操接口：window.__model（与按钮共用逻辑；自动化/脚本无需碰 UI） */
 const applyModelText=async(text)=>{                      // 校验+生效+重建，返回结果对象
   try{
-    const errs=validateModel(JSON.parse(text));
+    const errs=validateModel(parseModel(text));
     if(errs.length) return {ok:false, errors:errs};
   }catch(e){ return {ok:false, errors:["JSON 解析失败："+e.message]}; }
   modelText=text; ptext.value=text; pdirty.textContent="";
@@ -685,7 +718,7 @@ const applyModelText=async(text)=>{                      // 校验+生效+重建
 };
 window.__model={
   get:()=>modelText,                                     // 当前生效的模型 JSON 文本
-  validate:(text)=>{ try{return validateModel(JSON.parse(text??modelText));}
+  validate:(text)=>{ try{return validateModel(parseModel(text??modelText));}
                     catch(e){return ["JSON 解析失败："+e.message];} },
   set:(text)=>applyModelText(typeof text==="string"?text:JSON.stringify(text,null,2)),
   load:async(name="lyre.model.json")=>{                  // 从服务器目录载入并重建
@@ -709,7 +742,7 @@ window.__model={
   },
 };
 Object.defineProperty(window.__model,"json",{            // 便捷：直接取/存对象形式
-  get:()=>JSON.parse(modelText),
+  get:()=>parseModel(modelText),
   set:(o)=>applyModelText(JSON.stringify(o,null,2)),
 });
 

@@ -54,6 +54,11 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 | 导出副本 | 带时间戳副本 → `framework/out/lyre_*.model.json` |
 
 - 文本区改动未应用时标题旁显示"（未应用修改）"
+- **模型 JSON 支持注释（JSONC）**：`//` 行尾/整行注释都会被 `parseModel()` 剥离后解析，
+  "保存到模型文件"连注释一起回写——用户可直接读注释调参
+- **组件悬停联动**：侧边栏组件行 hover → 3D 对应网格 emissive 高亮（橙）+ JSON 文本框
+  自动选中并滚动到对应参数段（PART2KEY 映射：body→outline、pegs→pegs、strings→strings、
+  pegHoles→pegHoles）
 - 校验覆盖：必填字段、正数约束、bezierSegs 每段 6 数字、units 只支持 mm
 
 ### 组件系统（左侧"组件"清单，勾选/取消即生效）
