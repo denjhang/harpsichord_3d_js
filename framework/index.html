@@ -444,23 +444,49 @@ $("ptitle").onclick=()=>$("panel").classList.toggle("collapsed");
    ⌂ 默认视角 = 角度复位 + 中心点(热床面与物体中点) + 距离（以热床为构图基准）
    ⛶ 最佳缩放 = 角度不动，只调中心点(物体包围盒中心) + 距离（以物体为构图基准） */
 const REF_FRAC=0.63;
-const fitDistOf=size=>{                                  // size:包围盒尺寸(x,y 水平, z-up)
+const projExt=size=>{                                    // 包围盒的屏幕水平/垂直投影尺寸(z-up)
+  const sp=Math.abs(Math.sin(pitch)), cp=Math.abs(Math.cos(pitch));
+  const sy=Math.abs(Math.sin(yaw)),   cy=Math.abs(Math.cos(yaw));
+  return { h:size.x*sy+size.y*cy,
+           v:size.x*sp*sy+size.y*sp*cy+size.z*cp };
+};
+/* 以 target 为画面中心，对热床+物体的每个角点做屏幕投影，
+   距离同时满足：水平占窗 REF_FRAC、垂直留 8% 边距——任何内容都不出屏 */
+const fitDistOf=(boxes,target)=>{
   const fV=camera.fov*Math.PI/180, fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
-  const extH=size.x*Math.abs(Math.sin(yaw))+size.y*Math.abs(Math.cos(yaw));
-  return extH/(REF_FRAC*2*Math.tan(fH/2));
+  const sy=Math.sin(yaw), cy=Math.cos(yaw), sp=Math.sin(pitch), cp=Math.cos(pitch);
+  let mx=0, my=0;
+  for(const b of boxes){
+    for(let i=0;i<8;i++){
+      const rel=new THREE.Vector3(
+        (i&1?b.size.x:-b.size.x)/2, (i&2?b.size.y:-b.size.y)/2, (i&4?b.size.z:-b.size.z)/2)
+        .add(b.center).sub(target);
+      mx=Math.max(mx, Math.abs(rel.x*cy-rel.y*sy));
+      my=Math.max(my, Math.abs(rel.x*(-sp*sy)+rel.y*(-sp*cy)+rel.z*cp));
+    }
+  }
+  return Math.max(mx/(REF_FRAC*Math.tan(fH/2)), my/(0.92*Math.tan(fV/2)));
+};
+const BED_BOX=()=>({center:new THREE.Vector3(0,0,0),   size:new THREE.Vector3(250,250,3)});
+const sceneBoxes=()=>{                                   // 热床 + 物体（兜底盒，绝不静默失效）
+  const arr=[BED_BOX()];
+  if(current){
+    const b=new THREE.Box3().setFromObject(current);
+    arr.push({center:b.getCenter(new THREE.Vector3()), size:b.getSize(new THREE.Vector3())});
+  } else arr.push({center:new THREE.Vector3(0,BODY_TOP/2,0), size:new THREE.Vector3(180,BODY_TOP,1)});
+  return arr;
 };
 $("homeBtn").onclick=()=>{
   animCam(DEF_VIEW.yaw, DEF_VIEW.pitch, DEF_VIEW.roll, {
     target:new THREE.Vector3(0,BODY_TOP/4,0),
-    dist:fitDistOf(new THREE.Vector3(250,250,3)),        // 以热床为基准
+    dist:fitDistOf(sceneBoxes(), new THREE.Vector3(0,BODY_TOP/4,0)),
   });
 };
 $("fitBtn").onclick=()=>{
-  const box=new THREE.Box3();
-  if(current) box.setFromObject(current); else box.set(
-    new THREE.Vector3(-90,0,0), new THREE.Vector3(90,BODY_TOP,0));  // 兜底，绝不静默失效
-  const center=box.getCenter(new THREE.Vector3());
-  animCam(yaw, pitch, roll, {target:center, dist:fitDistOf(box.getSize(new THREE.Vector3()))});
+  const boxes=sceneBoxes();
+  const c=current?new THREE.Box3().setFromObject(current).getCenter(new THREE.Vector3())
+                 :new THREE.Vector3(0,BODY_TOP/4,0);      // 中心=物体包围盒中心
+  animCam(yaw, pitch, roll, {target:c, dist:fitDistOf(boxes,c)});
 };
 
 /* AI 直操接口：window.__model（与按钮共用逻辑；自动化/脚本无需碰 UI） */
