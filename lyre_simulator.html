@@ -245,7 +245,7 @@ function bedTexture(){
 }
 
 /* ============ 自由视角（操作对齐 FreeCAD）============ */
-const target=new THREE.Vector3(0,0,0);                 // 视角原点=热床中心（非物体中心）
+const target=new THREE.Vector3(0,BODY_TOP/4,0);        // 默认中心=热床面与物体中心的中点
 let yaw=.7, pitch=.5, roll=0, dist=58;                 // 初始轴测
 function fitView(){                                    // 自动适应窗口：床+琴体整体可见
   const fV=camera.fov*Math.PI/180;
