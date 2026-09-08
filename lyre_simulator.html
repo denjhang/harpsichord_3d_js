@@ -313,7 +313,7 @@ window.addEventListener("keydown",e=>{
 /* ============ 导航立方体（仿 FreeCAD：圆角六面可点击 + 环绕箭头 + 滚转弯箭头 + 小立方切换轴十字）============ */
 const cubeCv=document.getElementById("cube"), cg=cubeCv.getContext("2d");
 let widgetMode="cube";                                  // cube | axes
-const hitItems=[];                                      // 每帧重建：{path, act}
+const hitItems=[];                                      // 每帧重建：{path, act, tip}
 // 每面：法线、切向轴 u/v、底色、标签、点击后的目标视角(yaw,pitch)
 const FACES=[
   {n:[0,0, 1],u:[1,0,0], v:[0,1,0], col:"#d9cdb4", l:"前", v0:0,        p0:0},
@@ -353,30 +353,84 @@ function drawCube(){
   const S=264, c=S/2;
   cg.clearRect(0,0,S,S);
   hitItems.length=0;
-  const reg=(path,act)=>hitItems.push({path,act});
+  const reg=(path,act,tip="")=>hitItems.push({path,act,tip});
   // 背景
   cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,116,0,7); cg.fill();
   cg.strokeStyle="rgba(90,85,78,.35)"; cg.lineWidth=2; cg.stroke();
   const proj=r=>[c+r[0]*80, c-r[1]*80];
   if(widgetMode==="cube"){
-    const h=.76, rad=36;                                // 大倒角：圆角半径≈棱长1/3，棱边曲面明显
-    const order=FACES.map(f=>({f,rn:cubeRot(f.n)})).sort((a,b)=>a.rn[2]-b.rn[2]);
-    for(const {f,rn} of order){
-      if(rn[2]<.02) continue;
-      const ru=cubeRot(f.u), rv=cubeRot(f.v);
-      const ctr=[rn[0]*h, rn[1]*h];
-      const corner=(su,sv)=>proj([ctr[0]+ru[0]*h*su+rv[0]*h*sv,
-                                  ctr[1]+ru[1]*h*su+rv[1]*h*sv]);
-      const pts=[corner(-1,-1),corner(1,-1),corner(1,1),corner(-1,1)];
+    // 真·倒角立方体：面收缩，12条双面棱与8个三面角处画独立倒角块（可点击切过渡视角）
+    const h=.76, sk=.68, rad=16;                        // sk=面收缩比例，露出的空隙由倒角块填
+    const mixHex=(a,b)=>{                               // 两面颜色混出倒角色
+      const pa=parseInt(a.slice(1),16), pb=parseInt(b.slice(1),16);
+      const m=i=>Math.round(((pa>>i&255)+(pb>>i&255))/2);
+      return "#"+[16,8,0].map(i=>m(i).toString(16).padStart(2,"0")).join("");
+    };
+    const dirOf=(yaw,pitch)=>[Math.cos(pitch)*Math.sin(yaw),Math.sin(pitch),Math.cos(pitch)*Math.cos(yaw)];
+    const viewOf=dirs=>{                                // 若干方向平均→目标yaw/pitch
+      const v=dirs.reduce((a,d)=>[a[0]+d[0],a[1]+d[1],a[2]+d[2]],[0,0,0]);
+      return [Math.atan2(v[0],v[2]), Math.asin(v[1]/Math.hypot(...v))];
+    };
+    const p3=(f,su,sv,k)=>cubeRot([(f.n[0]+f.u[0]*su+f.v[0]*sv)*h*k,
+                                   (f.n[1]+f.u[1]*su+f.v[1]*sv)*h*k,
+                                   (f.n[2]+f.u[2]*su+f.v[2]*sv)*h*k]);
+    const keyOf=(f,su,sv)=>p3(f,su,sv,1).map(v=>v.toFixed(2)).join("|");
+    const vis=FACES.map(f=>({f,rn:cubeRot(f.n)}))
+                   .filter(o=>o.rn[2]>.02).sort((a,b)=>a.rn[2]-b.rn[2]);
+    // 倒角块画在面之前？不：先画面，再画倒角块盖住交界缝
+    const ctrOf=f=>proj(cubeRot(f.n.map(v=>v*h)));
+    for(const {f,rn} of vis){
+      const pts=[p3(f,-1,-1,sk),p3(f,1,-1,sk),p3(f,1,1,sk),p3(f,-1,1,sk)].map(proj);
       const path=roundedPoly(pts,rad);
       cg.fillStyle=f.col; cg.globalAlpha=.6+.4*rn[2]; cg.fill(path); cg.globalAlpha=1;
       cg.strokeStyle="#6a645c"; cg.lineWidth=1.4; cg.stroke(path);
-      // 面标签（略向内收）
-      const ctrp=proj(ctr), tp=[ctrp[0]+(ctrp[0]-c)*.25, ctrp[1]+(ctrp[1]-c)*.25];
+      const ctrp=ctrOf(f), tp=[ctrp[0]+(ctrp[0]-c)*.25, ctrp[1]+(ctrp[1]-c)*.25];
       cg.fillStyle="#4a453e"; cg.font="bold 19px Georgia";
       cg.textAlign="center"; cg.textBaseline="middle";
       cg.fillText(f.l,tp[0],tp[1]);
-      reg(path,()=>animCam(f.v0,f.p0,0));               // 点击面→切到该面视角
+      reg(path,()=>animCam(f.v0,f.p0,0),"面:"+f.l);      // 点击面→该面正交视角
+    }
+    // 双面倒角（可见面对的共享棱，可见时最多3条；全立方共12条棱）
+    for(let i=0;i<vis.length;i++)for(let j=i+1;j<vis.length;j++){
+      const A=vis[i].f, B=vis[j].f, sa=[], sb=[];
+      for(const su of[-1,1])for(const sv of[-1,1]){
+        const k=keyOf(A,su,sv);
+        for(const u of[-1,1])for(const v of[-1,1])
+          if(keyOf(B,u,v)===k){ sa.push([su,sv]); sb.push([u,v]); }
+      }
+      if(sa.length!==2) continue;
+      const q=[p3(A,...sa[0],sk),p3(A,...sa[1],sk),p3(B,...sb[1],sk),p3(B,...sb[0],sk)].map(proj);
+      const strip=roundedPoly(q,14);                    // 大倒角条
+      cg.fillStyle=mixHex(A.col,B.col); cg.fill(strip);
+      cg.strokeStyle="#6a645c"; cg.lineWidth=1.2; cg.stroke(strip);
+      const [ty,tp2]=viewOf([dirOf(A.v0,A.p0),dirOf(B.v0,B.p0)]);
+      const mid=[(q[0][0]+q[1][0]+q[2][0]+q[3][0])/4,(q[0][1]+q[1][1]+q[2][1]+q[3][1])/4];
+      const hot=new Path2D(); hot.arc(mid[0],mid[1],30,0,7);   // 放大热区：条带中点大圆
+      reg(hot,()=>animCam(ty,tp2,0),"棱:"+A.l+B.l);      // 点击棱→两面之间的对角视角
+      reg(strip,()=>animCam(ty,tp2,0));
+    }
+    // 三面角倒角（三面共同顶点；全立方共8个）
+    if(vis.length===3){
+      const [A,B,C]=vis.map(o=>o.f);
+      const pts=[];
+      { // 公共顶点在三个面里的局部坐标各不相同 → 按全局键求交集
+        const loc=f=>{const m={};for(const su of[-1,1])for(const sv of[-1,1])m[keyOf(f,su,sv)]=[su,sv];return m;};
+        const mA=loc(A),mB=loc(B),mC=loc(C);
+        for(const k in mA) if(mB[k]&&mC[k]){
+          pts.push(proj(p3(A,...mA[k],sk)),proj(p3(B,...mB[k],sk)),proj(p3(C,...mC[k],sk)));
+          break;
+        }
+      }
+      if(pts.length===3){
+        const tri=roundedPoly(pts,14);
+        cg.fillStyle=mixHex(mixHex(A.col,B.col),C.col); cg.fill(tri);
+        cg.strokeStyle="#6a645c"; cg.lineWidth=1.2; cg.stroke(tri);
+        const [ty,tp2]=viewOf([A,B,C].map(f=>dirOf(f.v0,f.p0)));
+        const g2=[(pts[0][0]+pts[1][0]+pts[2][0])/3,(pts[0][1]+pts[1][1]+pts[2][1])/3];
+        const hot2=new Path2D(); hot2.arc(g2[0],g2[1],34,0,7);   // 放大热区：重心大圆
+        reg(hot2,()=>animCam(ty,tp2,0),"角:"+A.l+B.l+C.l);// 点击角→轴测视角
+        reg(tri,()=>animCam(ty,tp2,0));
+      }
     }
   } else {                                              // 轴十字（小立方切换）
     for(const [ax,col,l] of [[[1,0,0],"#e0392b","X"],[[0,1,0],"#37b24d","Y"],[[0,0,1],"#3b6fe0","Z"]]){
@@ -399,7 +453,7 @@ function drawCube(){
   for(const [x,y,d,act] of arrows){
     const p=triPath(x,y,d,12);
     cg.fillStyle="rgba(120,112,102,.55)"; cg.fill(p);
-    reg(p,act);
+    reg(p,act,"箭头"+d);
   }
   // 左上/右上弯曲箭头：绕视线滚转物体（数学坐标 y向上，角度制）
   const bend=(cx2,cy2,a0,a1,act)=>{
@@ -418,7 +472,7 @@ function drawCube(){
     hp.closePath();
     cg.fillStyle="rgba(120,112,102,.6)"; cg.fill(hp);
     const hit=new Path2D(); hit.arc(cx2,cy2,26,0,7);     // 加大命中区
-    reg(hit,act);
+    reg(hit,act,"弯箭头");
   };
   bend(c-66,c-66, 180, 90, ()=>animCam(yaw,pitch,roll+30*D2R));  // 左上：逆时针滚转
   bend(c+66,c-66, 0,   90, ()=>animCam(yaw,pitch,roll-30*D2R));  // 右上：顺时针滚转
@@ -436,20 +490,26 @@ function drawCube(){
     const mp=roundedPoly(pts.map(q=>[q[0],q[1]]),3);    // 小立方同样倒角
     cg.fillStyle=col; cg.fill(mp); cg.strokeStyle="#6a645c"; cg.lineWidth=1; cg.stroke(mp);
   }
-  reg(mini,()=>{widgetMode=widgetMode==="cube"?"axes":"cube";});
+  reg(mini,()=>{widgetMode=widgetMode==="cube"?"axes":"cube";},"小立方");
 }
 // 命中测试（坐标×2：canvas 220 / CSS 110）
 function cubeHit(e){
   const r=cubeCv.getBoundingClientRect();
   return {x:(e.clientX-r.left)*2, y:(e.clientY-r.top)*2};
 }
+// 调试接口：命中查询 / 当前视角
+window.__cubeHitAt=(x,y)=>{if(!hitItems.length)drawCube();const i=hitItems.findIndex(it=>cg.isPointInPath(it.path,x,y));return i<0?null:hitItems[i].tip;};
+window.__view=()=>({yaw:+(yaw*180/Math.PI).toFixed(1),pitch:+(pitch*180/Math.PI).toFixed(1),roll:+(roll*180/Math.PI).toFixed(1)});
+window.__hitInfo=()=>({n:hitItems.length, tips:hitItems.map(i=>i.tip), mode:widgetMode, frame:performance.now()});
 cubeCv.addEventListener("click",e=>{
   const {x,y}=cubeHit(e);
+  if(!hitItems.length) drawCube();                     // rAF 被节流时也能命中
   for(let i=hitItems.length-1;i>=0;i--)
     if(cg.isPointInPath(hitItems[i].path,x,y)){ hitItems[i].act(); return; }
 });
 cubeCv.addEventListener("pointermove",e=>{
   const {x,y}=cubeHit(e);
+  if(!hitItems.length) drawCube();
   cubeCv.style.cursor=hitItems.some(it=>cg.isPointInPath(it.path,x,y))?"pointer":"default";
 });
 let camAnim=null;
@@ -479,6 +539,7 @@ function resize(){
 }
 addEventListener("resize",resize); resize(); applyCam();
 function frame(t){
+  try{
   for(const st of strings){                              // 弦振动：两端固定的驻波
     const arr=new Float32Array((SEG+TAIL)*3);
     const dt=(t-st.lastPluck)/1000;
@@ -502,6 +563,7 @@ function frame(t){
   }
   stepCube(t);
   renderer.render(scene,camera);
+  }catch(e){ window.__drawErr=(window.__drawErr||"")+e.stack+" | "; }
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
