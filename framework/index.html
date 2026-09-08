@@ -392,12 +392,17 @@ async function refresh(){
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
 }
 document.getElementById("rebuild").onclick=refresh;
-window.__exportSTL=()=>{
+window.__exportSTL=async()=>{
   if(!current) return;
   const txt=new STLExporter().parse(current);
-  const a=document.createElement("a");
-  a.href=URL.createObjectURL(new Blob([txt],{type:"model/stl"}));
-  a.download="lyre_body.stl"; a.click();
+  try{                                                   // 静默 POST 到本地服务器存盘，绝不弹窗
+    const r=await fetch("/save?name=lyre_body.stl", {method:"POST", body:txt});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const j=await r.json();
+    hud.textContent=`✅ STL 已保存：${j.saved}（${j.bytes} 字节）`;
+  }catch(e){
+    hud.textContent="❌ 保存失败（需用 framework/server.py 启动服务）："+e.message;
+  }
 };
 document.getElementById("stl").onclick=window.__exportSTL;
 addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
