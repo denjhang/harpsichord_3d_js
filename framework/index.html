@@ -95,13 +95,14 @@ function bedTexture(){
 }
 
 /* ================= H5 移植：自由视角相机（yaw/pitch/roll）================= */
-const target=new THREE.Vector3(0,0,110);
-let yaw=.62, pitch=.5, roll=0, dist=620;
+const BODY_TOP=240;                                    // 缩放后琴体全高(mm)
+const target=new THREE.Vector3(0,BODY_TOP/4,0);        // H5 要点：中心=热床面与物体中心的中点
+let yaw=.7, pitch=.5, roll=0, dist=620;                // H5 初始轴测视角
 function fitView(){
   const fV=camera.fov*Math.PI/180;
   const fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
-  const rad=Math.max(250, 240);
-  dist=(rad*1.25)/Math.tan(Math.min(fV,fH)/2);
+  const rad=Math.max(125, BODY_TOP);                   // H5 要点：半径=max(床半宽, 琴体全高)
+  dist=(rad*1.18)/Math.tan(Math.min(fV,fH)/2);         // 系数 1.18 与 H5 一致
 }
 function applyCam(){
   pitch=Math.max(-1.45,Math.min(1.45,pitch));
