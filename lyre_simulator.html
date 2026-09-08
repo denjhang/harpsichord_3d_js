@@ -10,7 +10,7 @@
   #c3d.dragging{cursor:grabbing}
   #hud{position:fixed;top:16px;left:20px;color:#5a554e;opacity:.92;font-size:13px;line-height:1.8;pointer-events:none}
   #hud b{color:#3a362f;font-size:16px;letter-spacing:2px}
-  #cube{position:fixed;top:16px;right:16px;width:110px;height:110px;cursor:pointer}
+  #cube{position:fixed;top:14px;right:14px;width:132px;height:132px;cursor:pointer}
   #tips{position:fixed;bottom:14px;left:0;right:0;text-align:center;color:#8b857a;font-size:12.5px;pointer-events:none}
   #tips span{color:#55504a}
 </style>
@@ -21,7 +21,7 @@
 <body>
 <canvas id="c3d"></canvas>
 <div id="hud"><b>里拉竖琴 · 7 弦</b><br>调弦：C4 D4 E4 G4 A4 C5 D5<br>打印比例 <b id="sc"></b>（缩至 240mm，适配 250 热床）<br>Karplus-Strong 声学合成</div>
-<canvas id="cube" width="220" height="220" style="width:110px;height:110px"></canvas>
+<canvas id="cube" width="264" height="264" style="width:132px;height:132px"></canvas>
 <div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 扫弦/点弦弹奏 · 键盘 <span>A S D F G H J / 1-7</span> · 右上角立方体=<span>快速视角</span></div>
 <script type="module">
 import * as THREE from "three";
@@ -350,16 +350,16 @@ function triPath(x,y,dir,s){                            // 环绕三角箭头 di
   const p=new Path2D(); p.moveTo(...p1); p.lineTo(...p2); p.lineTo(...tip); p.closePath(); return p;
 }
 function drawCube(){
-  const S=220, c=S/2;
+  const S=264, c=S/2;
   cg.clearRect(0,0,S,S);
   hitItems.length=0;
   const reg=(path,act)=>hitItems.push({path,act});
   // 背景
-  cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,96,0,7); cg.fill();
+  cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,116,0,7); cg.fill();
   cg.strokeStyle="rgba(90,85,78,.35)"; cg.lineWidth=2; cg.stroke();
-  const proj=r=>[c+r[0]*72, c-r[1]*72];
+  const proj=r=>[c+r[0]*80, c-r[1]*80];
   if(widgetMode==="cube"){
-    const h=.6, rad=12;                                 // rad：面角圆角半径→棱边曲面观感
+    const h=.76, rad=36;                                // 大倒角：圆角半径≈棱长1/3，棱边曲面明显
     const order=FACES.map(f=>({f,rn:cubeRot(f.n)})).sort((a,b)=>a.rn[2]-b.rn[2]);
     for(const {f,rn} of order){
       if(rn[2]<.02) continue;
@@ -373,7 +373,7 @@ function drawCube(){
       cg.strokeStyle="#6a645c"; cg.lineWidth=1.4; cg.stroke(path);
       // 面标签（略向内收）
       const ctrp=proj(ctr), tp=[ctrp[0]+(ctrp[0]-c)*.25, ctrp[1]+(ctrp[1]-c)*.25];
-      cg.fillStyle="#4a453e"; cg.font="bold 15px Georgia";
+      cg.fillStyle="#4a453e"; cg.font="bold 19px Georgia";
       cg.textAlign="center"; cg.textBaseline="middle";
       cg.fillText(f.l,tp[0],tp[1]);
       reg(path,()=>animCam(f.v0,f.p0,0));               // 点击面→切到该面视角
@@ -389,7 +389,7 @@ function drawCube(){
     cg.lineCap="butt";
   }
   // 四个环绕三角箭头：上下左右平转/俯仰视角
-  const A=84;
+  const A=102;
   const arrows=[
     [c,  c-A, 0, ()=>animCam(yaw,           Math.min(1.45,pitch+45*D2R), roll)], // ↑抬头
     [c,  c+A, 2, ()=>animCam(yaw,           Math.max(-1.45,pitch-45*D2R), roll)], // ↓低头
@@ -397,13 +397,13 @@ function drawCube(){
     [c+A,c,   1, ()=>animCam(yaw-45*D2R,    pitch, roll)],                      // →右环绕
   ];
   for(const [x,y,d,act] of arrows){
-    const p=triPath(x,y,d,11);
+    const p=triPath(x,y,d,12);
     cg.fillStyle="rgba(120,112,102,.55)"; cg.fill(p);
     reg(p,act);
   }
   // 左上/右上弯曲箭头：绕视线滚转物体（数学坐标 y向上，角度制）
   const bend=(cx2,cy2,a0,a1,act)=>{
-    const r=20, pt=t=>{const q=t*D2R; return [cx2+Math.cos(q)*r, cy2-Math.sin(q)*r];};
+    const r=23, pt=t=>{const q=t*D2R; return [cx2+Math.cos(q)*r, cy2-Math.sin(q)*r];};
     const p=new Path2D(); p.moveTo(...pt(a0));
     for(let i=1;i<=16;i++) p.lineTo(...pt(a0+(a1-a0)*i/16));
     cg.strokeStyle="rgba(120,112,102,.6)"; cg.lineWidth=5; cg.lineCap="round"; cg.stroke(p);
@@ -417,16 +417,16 @@ function drawCube(){
     hp.lineTo(ex-tx*3+ty*5,ey-ty*3-tx*5);
     hp.closePath();
     cg.fillStyle="rgba(120,112,102,.6)"; cg.fill(hp);
-    const hit=new Path2D(); hit.arc(cx2,cy2,22,0,7);     // 加大命中区
+    const hit=new Path2D(); hit.arc(cx2,cy2,26,0,7);     // 加大命中区
     reg(hit,act);
   };
-  bend(c-56,c-56, 180, 90, ()=>animCam(yaw,pitch,roll+30*D2R));  // 左上：逆时针滚转
-  bend(c+56,c-56, 0,   90, ()=>animCam(yaw,pitch,roll-30*D2R));  // 右上：顺时针滚转
+  bend(c-66,c-66, 180, 90, ()=>animCam(yaw,pitch,roll+30*D2R));  // 左上：逆时针滚转
+  bend(c+66,c-66, 0,   90, ()=>animCam(yaw,pitch,roll-30*D2R));  // 右上：顺时针滚转
   // 右下角小立方体：切换 立方体/轴十字（FreeCAD 同款功能）
-  const mini=new Path2D(); mini.rect(176,176,32,32);
+  const mini=new Path2D(); mini.rect(212,212,40,40);
   cg.fillStyle="rgba(250,250,250,.8)"; cg.fill(mini);
   cg.strokeStyle="rgba(90,85,78,.4)"; cg.lineWidth=1.5; cg.stroke(mini);
-  const mx2=192,my2=192,s2=8;                           // 迷你等轴立方
+  const mx2=232,my2=232,s2=9;                           // 迷你等轴立方
   const iso=(x,y,z)=>[mx2+(x-z)*s2*.9, my2-(y*1.1-(x+z)*.45)*s2];
   for(const [pts,col] of [
     [[iso(-1,1,-1),iso(1,1,-1),iso(1,1,1),iso(-1,1,1)],"#cfc3aa"],      // 顶
