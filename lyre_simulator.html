@@ -246,13 +246,14 @@ function bedTexture(){
 
 /* ============ 自由视角（操作对齐 FreeCAD）============ */
 const target=new THREE.Vector3(0,BODY_TOP/2,0);        // 初始对准琴体中部
-let yaw=.0, pitch=0, dist=58;
+let yaw=.0, pitch=0, roll=0, dist=58;
 function applyCam(){
   pitch=Math.max(-1.45,Math.min(1.45,pitch));
   camera.position.set(
     target.x+dist*Math.cos(pitch)*Math.sin(yaw),
     target.y+dist*Math.sin(pitch),
     target.z+dist*Math.cos(pitch)*Math.cos(yaw));
+  camera.up.set(Math.sin(roll),Math.cos(roll),0);      // roll=绕视线滚转（弯箭头）
   camera.lookAt(target);
 }
 let mode=null,px=0,py=0;
@@ -303,83 +304,157 @@ window.addEventListener("keydown",e=>{
   if(i!==undefined) pluckSt(strings[i]);
 });
 
-/* ============ 视角立方体（真3D投影，六面着色+标签，点击切视角）============ */
+/* ============ 导航立方体（仿 FreeCAD：圆角六面可点击 + 环绕箭头 + 滚转弯箭头 + 小立方切换轴十字）============ */
 const cubeCv=document.getElementById("cube"), cg=cubeCv.getContext("2d");
-// 每面：法线、切向轴 u/v、底色、标签（与主视图 yaw/pitch 同步旋转）
+let widgetMode="cube";                                  // cube | axes
+const hitItems=[];                                      // 每帧重建：{path, act}
+// 每面：法线、切向轴 u/v、底色、标签、点击后的目标视角(yaw,pitch)
 const FACES=[
-  {n:[0,0, 1],u:[1,0,0],v:[0,1,0], col:"#d9cdb4", l:"前"},
-  {n:[0,0,-1],u:[-1,0,0],v:[0,1,0],col:"#c4b8a0", l:"后"},
-  {n:[1,0, 0],u:[0,0,-1],v:[0,1,0],col:"#cfc3aa", l:"右"},
-  {n:[-1,0,0],u:[0,0,1], v:[0,1,0],col:"#bfb39a", l:"左"},
-  {n:[0,1, 0],u:[1,0,0],v:[0,0,-1],col:"#e6dcc6", l:"上"},
-  {n:[0,-1,0],u:[1,0,0],v:[0,0,1], col:"#b3a78f", l:"下"},
+  {n:[0,0, 1],u:[1,0,0], v:[0,1,0], col:"#d9cdb4", l:"前", v0:0,        p0:0},
+  {n:[0,0,-1],u:[-1,0,0],v:[0,1,0], col:"#c4b8a0", l:"后", v0:Math.PI,  p0:0},
+  {n:[1,0, 0],u:[0,0,-1],v:[0,1,0], col:"#cfc3aa", l:"右", v0:-Math.PI/2,p0:0},
+  {n:[-1,0,0],u:[0,0,1], v:[0,1,0], col:"#bfb39a", l:"左", v0:Math.PI/2, p0:0},
+  {n:[0,1, 0],u:[1,0,0], v:[0,0,-1],col:"#e6dcc6", l:"上", v0:0,        p0:Math.PI/2},
+  {n:[0,-1,0],u:[1,0,0], v:[0,0,1], col:"#b3a78f", l:"下", v0:0,        p0:-Math.PI/2},
 ];
 function cubeRot(v){                                    // 与主相机一致的旋转
   const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
   const x=v[0]*cy+v[2]*sy, z0=-v[0]*sy+v[2]*cy, y0=v[1];
   return [x, y0*cp-z0*sp, y0*sp+z0*cp];
 }
+const D2R=Math.PI/180;
+function roundedPoly(pts,rad){                          // 圆角多边形（模拟棱边曲面）
+  const p=new Path2D(), n=pts.length;
+  const dist=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
+  for(let i=0;i<n;i++){
+    const prev=pts[(i-1+n)%n], cur=pts[i], next=pts[(i+1)%n];
+    const l1=dist(cur,prev), l2=dist(next,cur);
+    const r=Math.min(rad,l1/2.2,l2/2.2);
+    const ux=(cur[0]-prev[0])/l1, uy=(cur[1]-prev[1])/l1;
+    const wx=(next[0]-cur[0])/l2, wy=(next[1]-cur[1])/l2;
+    const ax=cur[0]-ux*r, ay=cur[1]-uy*r, bx=cur[0]+wx*r, by=cur[1]+wy*r;
+    if(i===0) p.moveTo(ax,ay); else p.lineTo(ax,ay);
+    p.quadraticCurveTo(cur[0],cur[1],bx,by);            // 角部二次曲线=圆滑棱边
+  }
+  p.closePath(); return p;
+}
+function triPath(x,y,dir,s){                            // 环绕三角箭头 dir:0上1右2下3左
+  const d=[[0,-1],[1,0],[0,1],[-1,0]][dir];
+  const p1=[x-d[1]*s, y+d[0]*s], p2=[x+d[1]*s, y-d[0]*s], tip=[x+d[0]*s*1.5, y+d[1]*s*1.5];
+  const p=new Path2D(); p.moveTo(...p1); p.lineTo(...p2); p.lineTo(...tip); p.closePath(); return p;
+}
 function drawCube(){
-  const S=220, c=S/2, R=72, h=.6;                       // h=立方体半边长(单位化)
+  const S=220, c=S/2;
   cg.clearRect(0,0,S,S);
-  cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,R+40,0,7); cg.fill();
+  hitItems.length=0;
+  const reg=(path,act)=>hitItems.push({path,act});
+  // 背景
+  cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,96,0,7); cg.fill();
   cg.strokeStyle="rgba(90,85,78,.35)"; cg.lineWidth=2; cg.stroke();
-  const proj=r=>[c+r[0]*R, c-r[1]*R];
-  // 画 6 个面（只画朝向观察者的面，先远后近）
-  const order=FACES.map(f=>{
-    const rn=cubeRot(f.n);
-    return {f,rn,depth:rn[2]};
-  }).sort((a,b)=>a.depth-b.depth);                      // 远的先画
-  for(const {f,rn} of order){
-    if(rn[2]<.02) continue;                             // 背面跳过
-    const ru=cubeRot(f.u), rv=cubeRot(f.v);
-    const ctr=[rn[0]*h, rn[1]*h];
-    const corner=(su,sv)=>proj([ctr[0]+ru[0]*h*su+rv[0]*h*sv,
-                                ctr[1]+ru[1]*h*su+rv[1]*h*sv]);
-    cg.beginPath();
-    cg.moveTo(...corner(-1,-1)); cg.lineTo(...corner(1,-1));
-    cg.lineTo(...corner(1,1));   cg.lineTo(...corner(-1,1));
-    cg.closePath();
-    // 按朝向微调明暗，增强立体感
-    cg.fillStyle=f.col; cg.globalAlpha=.6+.4*rn[2]; cg.fill(); cg.globalAlpha=1;
-    cg.strokeStyle="#6a645c"; cg.lineWidth=1.6; cg.stroke();
-    // 面标签
-    const [tx,ty]=proj([rn[0]*h*2.6, rn[1]*h*2.6]);
-    cg.fillStyle="#4a453e"; cg.font="bold 17px Georgia";
-    cg.textAlign="center"; cg.textBaseline="middle";
-    cg.fillText(f.l,tx,ty);
+  const proj=r=>[c+r[0]*72, c-r[1]*72];
+  if(widgetMode==="cube"){
+    const h=.6, rad=12;                                 // rad：面角圆角半径→棱边曲面观感
+    const order=FACES.map(f=>({f,rn:cubeRot(f.n)})).sort((a,b)=>a.rn[2]-b.rn[2]);
+    for(const {f,rn} of order){
+      if(rn[2]<.02) continue;
+      const ru=cubeRot(f.u), rv=cubeRot(f.v);
+      const ctr=[rn[0]*h, rn[1]*h];
+      const corner=(su,sv)=>proj([ctr[0]+ru[0]*h*su+rv[0]*h*sv,
+                                  ctr[1]+ru[1]*h*su+rv[1]*h*sv]);
+      const pts=[corner(-1,-1),corner(1,-1),corner(1,1),corner(-1,1)];
+      const path=roundedPoly(pts,rad);
+      cg.fillStyle=f.col; cg.globalAlpha=.6+.4*rn[2]; cg.fill(path); cg.globalAlpha=1;
+      cg.strokeStyle="#6a645c"; cg.lineWidth=1.4; cg.stroke(path);
+      // 面标签（略向内收）
+      const ctrp=proj(ctr), tp=[ctrp[0]+(ctrp[0]-c)*.25, ctrp[1]+(ctrp[1]-c)*.25];
+      cg.fillStyle="#4a453e"; cg.font="bold 15px Georgia";
+      cg.textAlign="center"; cg.textBaseline="middle";
+      cg.fillText(f.l,tp[0],tp[1]);
+      reg(path,()=>animCam(f.v0,f.p0,0));               // 点击面→切到该面视角
+    }
+  } else {                                              // 轴十字（小立方切换）
+    for(const [ax,col,l] of [[[1,0,0],"#e0392b","X"],[[0,1,0],"#37b24d","Y"],[[0,0,1],"#3b6fe0","Z"]]){
+      const r=cubeRot(ax), [ex,ey]=proj([r[0]*1.15,-r[1]*1.15]);
+      cg.strokeStyle=col; cg.lineWidth=5; cg.lineCap="round";
+      cg.beginPath(); cg.moveTo(c,c); cg.lineTo(ex,ey); cg.stroke();
+      cg.fillStyle=col; cg.font="bold 15px Georgia"; cg.textAlign="center"; cg.textBaseline="middle";
+      cg.fillText(l,ex*1.12-c*.12,ey*1.12-c*.12);
+    }
+    cg.lineCap="butt";
   }
-  // 顶点
-  for(const X of[-1,1])for(const Y of[-1,1])for(const Z of[-1,1]){
-    const r=cubeRot([X,Y,Z]); if(r[2]<-.2) continue;
-    const [px,py]=proj(r);
-    cg.fillStyle="#8a847c"; cg.beginPath(); cg.arc(px,py,2.2,0,7); cg.fill();
+  // 四个环绕三角箭头：上下左右平转/俯仰视角
+  const A=84;
+  const arrows=[
+    [c,  c-A, 0, ()=>animCam(yaw,           Math.min(1.45,pitch+45*D2R), roll)], // ↑抬头
+    [c,  c+A, 2, ()=>animCam(yaw,           Math.max(-1.45,pitch-45*D2R), roll)], // ↓低头
+    [c-A,c,   3, ()=>animCam(yaw+45*D2R,    pitch, roll)],                      // ←左环绕
+    [c+A,c,   1, ()=>animCam(yaw-45*D2R,    pitch, roll)],                      // →右环绕
+  ];
+  for(const [x,y,d,act] of arrows){
+    const p=triPath(x,y,d,11);
+    cg.fillStyle="rgba(120,112,102,.55)"; cg.fill(p);
+    reg(p,act);
   }
+  // 左上/右上弯曲箭头：绕视线滚转物体
+  const bend=(cx2,cy2,mirror,act)=>{
+    const p=new Path2D();
+    p.arc(cx2,cy2,20,mirror?Math.PI*.15:Math.PI*.35, mirror?Math.PI*.85:Math.PI*.65, mirror);
+    cg.strokeStyle="rgba(120,112,102,.6)"; cg.lineWidth=5; cg.lineCap="round"; cg.stroke(p);
+    cg.lineCap="butt";
+    const ea=mirror?Math.PI*.85:Math.PI*.65;            // 箭头端点
+    const ex=cx2+Math.cos(ea)*20, ey=cy2-Math.sin(ea)*20;
+    const ta=ea+(mirror?-1:1)*Math.PI/2;                // 切向
+    const hx=Math.cos(ta)*7, hy=-Math.sin(ta)*7, px2=-hy, py2=hx;
+    const hp=new Path2D();
+    hp.moveTo(ex+hx,ey+hy); hp.lineTo(ex-hx*.7+px2*.8,ey-hy*.7+py2*.8);
+    hp.lineTo(ex-hx*.7-px2*.8,ey-hy*.7-py2*.8); hp.closePath();
+    cg.fillStyle="rgba(120,112,102,.6)"; cg.fill(hp);
+    reg(p,act);
+  };
+  bend(c-62,c-62,false,()=>animCam(yaw,pitch,roll+30*D2R));   // 左上：逆时针滚转
+  bend(c+62,c-62,true, ()=>animCam(yaw,pitch,roll-30*D2R));   // 右上：顺时针滚转
+  // 右下角小立方体：切换 立方体/轴十字（FreeCAD 同款功能）
+  const mini=new Path2D(); mini.rect(176,176,32,32);
+  cg.fillStyle="rgba(250,250,250,.8)"; cg.fill(mini);
+  cg.strokeStyle="rgba(90,85,78,.4)"; cg.lineWidth=1.5; cg.stroke(mini);
+  const mx2=192,my2=192,s2=8;                           // 迷你等轴立方
+  const iso=(x,y,z)=>[mx2+(x-z)*s2*.9, my2-(y*1.1-(x+z)*.45)*s2];
+  for(const [pts,col] of [
+    [[iso(-1,1,-1),iso(1,1,-1),iso(1,1,1),iso(-1,1,1)],"#cfc3aa"],      // 顶
+    [[iso(-1,-1,1),iso(1,-1,1),iso(1,1,1),iso(-1,1,1)],"#b3a78f"],      // 前
+    [[iso(1,-1,1),iso(1,-1,-1),iso(1,1,-1),iso(1,1,1)],"#c4b8a0"],      // 右
+  ]){
+    const mp=roundedPoly(pts.map(q=>[q[0],q[1]]),2);
+    cg.fillStyle=col; cg.fill(mp); cg.strokeStyle="#6a645c"; cg.lineWidth=1; cg.stroke(mp);
+  }
+  reg(mini,()=>{widgetMode=widgetMode==="cube"?"axes":"cube";});
+}
+// 命中测试（坐标×2：canvas 220 / CSS 110）
+function cubeHit(e){
+  const r=cubeCv.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*2, y:(e.clientY-r.top)*2};
 }
 cubeCv.addEventListener("click",e=>{
-  const r=cubeCv.getBoundingClientRect();
-  const mx=(e.clientX-r.left)*2, my=(e.clientY-r.top)*2;
-  const dx=mx-110, dy=110-my;
-  if(Math.hypot(dx,dy)>100) return;
-  // 按点击方位选视角：中心=轴测，上下/左右=正交面，四角=45°对角
-  let ty,tp;
-  if(Math.hypot(dx,dy)<34){ ty=.7; tp=.5; }                          // 中心：轴测
-  else if(Math.abs(dy)>Math.abs(dx)*1.6){ ty=0; tp=dy>0?Math.PI/2:-Math.PI/2; }      // 上/下
-  else if(Math.abs(dx)>Math.abs(dy)*1.6){ tp=0; ty=dx>0?-Math.PI/2:Math.PI/2; }      // 左/右
-  else if(dy>0){ ty=dx>0?-.785:.785; tp=.615; }                      // 前象限对角
-  else { ty=dx>0?-2.356:2.356; tp=.615; }                            // 后象限对角
-  animCam(ty,tp);
+  const {x,y}=cubeHit(e);
+  for(let i=hitItems.length-1;i>=0;i--)
+    if(cg.isPointInPath(hitItems[i].path,x,y)){ hitItems[i].act(); return; }
+});
+cubeCv.addEventListener("pointermove",e=>{
+  const {x,y}=cubeHit(e);
+  cubeCv.style.cursor=hitItems.some(it=>cg.isPointInPath(it.path,x,y))?"pointer":"default";
 });
 let camAnim=null;
-function animCam(ty,tp){
-  const s={yaw,pitch,dist};
+function animCam(ty,tp,tr=roll){
+  const s={yaw,pitch,roll,dist};
   const dYaw=((ty-s.yaw+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
-  camAnim={t0:performance.now(),dur:450,s,dYaw,tp:tp-s.pitch};
+  let dRoll=((tr-s.roll+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
+  camAnim={t0:performance.now(),dur:450,s,dYaw,tp:tp-s.pitch,dRoll};
 }
 function stepCube(t){
   if(camAnim){
     const k=Math.min(1,(t-camAnim.t0)/camAnim.dur), e=1-Math.pow(1-k,3);
     yaw=camAnim.s.yaw+camAnim.dYaw*e; pitch=camAnim.s.pitch+camAnim.tp*e;
+    roll=camAnim.s.roll+camAnim.dRoll*e;
     if(k>=1)camAnim=null;
     applyCam();
   }
