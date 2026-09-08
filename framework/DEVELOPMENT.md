@@ -63,7 +63,13 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 | 琴体 | Manifold 实体 | 重建（不渲染琴体） | ✅ 可见即导出 |
 | 调音柱孔洞 | 琴体上的布尔穿孔 | **重建几何**（genus 31→17） | ✅（随琴体） |
 | 调音柱体 | Manifold 实体（柱身+柱头，×7） | 仅隐藏 | ✅ 可见即导出 |
-| 琴弦 | three.js 视觉件（非实体） | 仅隐藏 | ❌ 永不导出 |
+| 琴弦 | **实体胶囊**（Manifold，仅显示） | 仅隐藏 | ❌ 永不导出 |
+
+**琴弦走线与布尔干涉断言**（`stringPath()` + `buildStrings()`）：
+- 走线：出弦孔内锚点 → 品条后缘上方 → 品条顶（留 0.8mm 间隙）→ 柱前表面缠绕（柱头顶面之下）
+- 每段 = 两球凸包（`Manifold.hull`）成胶囊；弦是实体，可被布尔检查
+- **每次重建都做 `strings.intersect(琴体/调音柱).volume()` 断言，>0.5mm³ 直接报错上屏**
+- 穿弦孔 cy 已从 -101.5 移到 **-106**：原位置在品条 footprint 下面，弦出来会撞品条（几何设计冲突）
 
 - 导出 STL = **当前可见的可打印组件合并**（琴体+调音柱），隐藏件自动排除
 - 新增参数：`params.pegs{n,gap,r,headR,h,headH,y}`、`params.pegHoles.r`、`params.strings.r`
@@ -114,7 +120,9 @@ await __exportSTL()                    // 导出 STL 到 out/lyre_body.stl（已
 | `cs.offset(-wall, "Round")` | Clipper2 内缩，返回新 CrossSection |
 | `cs.extrude(h)` | 沿 +Z 挤出，z 从 0 起 |
 | `Manifold.cylinder(h, rLow, rHigh)` | z 从 0 到 h，**不居中**；要贯穿自行 translate |
-| `a.subtract(b)` / `a.add(b)` | **b 只能是单个 Manifold**，多个要逐个循环 |
+| `a.subtract(b)` / `a.add(b)` / `a.intersect(b)` | **b 只能是单个 Manifold**，多个要逐个循环 |
+| `Manifold.hull([a,b])` | 两球凸包=定向胶囊（弦/缆索建模利器）；**所有 Manifold 必须同一 wasm 实例** |
+| `Module()` 多实例坑 | 每次调用 `Module()` 都新建 wasm 实例，**跨实例对象布尔会抛 BindingError**——内核里必须缓存单例（见 lyre.build.mjs 的 `W()`） |
 | `m.volume()` / `m.numTri()` / `m.genus()` / `m.status()` | 断言用；status() 是字符串枚举 `"NoError"` |
 | `m.getMesh()` | `{vertProperties: Float32Array, triVerts: Uint32Array}` → three BufferGeometry |
 | `setMinCircularAngle(6)` | 圆/圆柱细分精度，setup 后设置 |

@@ -380,7 +380,7 @@ function stepCube(t){
 }
 
 /* ================= 里拉建模（几何内核 = src/lyre.build.mjs，页面只管输入输出）================= */
-import { buildBody, buildPegs, validateModel, pegPositions } from "./src/lyre.build.mjs";
+import { buildBody, buildPegs, buildStrings, validateModel } from "./src/lyre.build.mjs";
 let current=null, pegMesh=null, stringGroup=null;
 let modelText=null;                                      // 当前生效的模型 JSON 文本（单一数据源）
 const MAT_BODY=()=>new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7});
@@ -402,36 +402,35 @@ async function build(){
   if(pegMesh){scene.remove(pegMesh);pegMesh.geometry.dispose();pegMesh=null;}
   if(stringGroup){scene.remove(stringGroup);
     stringGroup.children.forEach(s=>s.geometry.dispose());stringGroup=null;}
-  const parts=[];
+  const parts=[], solids=[];                             // solids：可打印实体（干涉检查对象）
   if(comp.body){
-    const {mesh,info}=await buildBody(model,{pegHoles:comp.pegHoles});
+    const {mesh,info,body}=await buildBody(model,{pegHoles:comp.pegHoles});
     current=setMesh(mesh,MAT_BODY());
+    current.userData.manifold=body;
     current.visible=comp.body;
     scene.add(current);
-    parts.push(info);
+    parts.push(info); solids.push(body);
   }
   if(comp.pegs && model.params.pegs){
-    const {mesh,info}=await buildPegs(model);
+    const {mesh,info,body}=await buildPegs(model);
     pegMesh=setMesh(mesh,MAT_PEG());
+    pegMesh.userData.manifold=body;
     pegMesh.visible=comp.pegs;
     scene.add(pegMesh);
-    parts.push(info);
+    parts.push(info); solids.push(body);
   }
   if(comp.strings && model.params.strings){
-    const p=model.params, g=p.strings;
-    stringGroup=new THREE.Group();                       // 琴弦：纯视觉，永不进 STL
-    for(const [px,py] of pegPositions(p)){
-      const a=new THREE.Vector3(px,p.stringHoles.cy,p.thickness*0.5);
-      const b=new THREE.Vector3(px,p.pegs.y+2,p.thickness+p.pegs.h);
-      const len=a.distanceTo(b);
-      const s=new THREE.Mesh(new THREE.CylinderGeometry(g.r,g.r,len,10),MAT_STR());
-      s.position.copy(a).add(b).multiplyScalar(.5);
-      s.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),
-        b.clone().sub(a).normalize());
-      stringGroup.add(s);
-    }
+    const {body,mesh,info}=await buildStrings(model);
+    if(stringGroup){scene.remove(stringGroup);
+      stringGroup.children.forEach(s=>s.geometry.dispose());}
+    stringGroup=setMesh(mesh,MAT_STR());                 // 实体胶囊弦；视觉件，永不进 STL
+    stringGroup.userData.manifold=body;
+    stringGroup.visible=comp.strings;
     scene.add(stringGroup);
-    parts.push(`琴弦×${stringGroup.children.length}（仅显示，不导出）`);
+    let inter=0;                                         // 布尔干涉断言：弦 × 琴体/调音柱 ≈ 0
+    for(const sv of solids) inter+=body.intersect(sv).volume();
+    if(inter>0.5) throw new Error(`琴弦与实体干涉 ${inter.toFixed(2)}mm³（>0.5 容差），走线参数有误`);
+    parts.push(`${info}  弦-体干涉:${inter.toFixed(2)}mm³ ✅`);
   }
   return parts.join("\n");
 }

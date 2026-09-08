@@ -3,6 +3,14 @@
  */
 import Module from "manifold-3d";
 
+/* 关键：所有 builder 共享同一个 wasm 实例——
+   Module() 每次调用都会新建实例，跨实例的 Manifold 无法互相布尔运算 */
+let _wasm=null;
+async function W(){
+  if(!_wasm){ _wasm=await Module(); _wasm.setup?.(); }
+  return _wasm;
+}
+
 /** 模型 JSON 校验，返回错误列表（空数组 = 通过） */
 export function validateModel(m){
   const errs=[];
@@ -44,7 +52,7 @@ export function pegPositions(p){
 /** 由模型 JSON 构建琴体，返回 { body(Manifold), mesh, info }
  *  opts.pegHoles=false 时不打调音孔（组件清单可切换） */
 export async function buildBody(model, opts={}){
-  const wasm = await Module(); wasm.setup?.();
+  const wasm = await W();
   const { Manifold, CrossSection, setMinCircularAngle } = wasm;
   setMinCircularAngle(6);
   const p = model.params;
@@ -86,9 +94,45 @@ export async function buildBody(model, opts={}){
     info:`status:${body.status()}  genus:${body.genus()}  tri:${body.numTri()}  体积:${(body.volume()/1000).toFixed(1)}cm³` };
 }
 
+/** 琴弦走线（每根弦的折线控制点，mm）：孔内 → 品条后缘 → 品条顶 → 调音柱顶
+ *  全程绕开琴体/品条材料，配合 buildStrings 的布尔干涉断言验证 */
+export function stringPath(p, x){
+  const g=p.strings, br=p.bridge, pg=p.pegs;
+  const m=0.2;                                           // 安全间隙：网格逼近下保证真不相交
+  return [
+    [x, p.stringHoles.cy, p.thickness-2],                                  // 孔内锚点（通孔空腔）
+    [x, br.y-br.d/2, br.z+br.h+g.r+m],                                     // 品条后缘上方
+    [x, br.y,       br.z+br.h+g.r+m],                                      // 品条顶（留间隙）
+    [x, pg.y-(pg.r+g.r+m), p.thickness+pg.h-2],                            // 柱前表面缠绕终点（柱头顶面之下，避开柱头）
+  ];
+}
+
+/** 琴弦实体（胶囊串联）：用于渲染 + 与琴体/品条的布尔干涉断言 */
+export async function buildStrings(model){
+  const wasm = await W();
+  const { Manifold } = wasm;
+  const p=model.params, g=p.strings;
+  let strings=null;
+  const xs=pegPositions(p);
+  for(let i=0;i<p.stringHoles.n;i++){
+    const path=stringPath(p, xs[i][0]);
+    let s=null;
+    for(let k=0;k<path.length-1;k++){
+      const cap=Manifold.hull([
+        Manifold.sphere(g.r).translate(path[k]),
+        Manifold.sphere(g.r).translate(path[k+1])]);
+      s=s?s.add(cap):cap;
+    }
+    strings=strings?strings.add(s):s;
+  }
+  if(String(strings.status())!=="NoError") throw new Error("琴弦布尔异常: status="+strings.status());
+  return { body:strings, mesh:strings.getMesh(),
+    info:`琴弦×${p.stringHoles.n}（实体胶囊）` };
+}
+
 /** 调音柱（可打印实体）：柱体+加粗柱头，立在琴体顶面。返回 { body, mesh, info } */
 export async function buildPegs(model){
-  const wasm = await Module(); wasm.setup?.();
+  const wasm = await W();
   const { Manifold } = wasm;
   const p=model.params, g=p.pegs;
   let pegs=null;
