@@ -82,7 +82,11 @@ export async function buildBody(model, opts={}){
       .translate([p.cavity.cx||0, p.cavity.cy||0, p.wall]);
     body=body.subtract(inner.intersect(region));
   }
-  const holes=[Manifold.cylinder(p.thickness+2,p.soundHole.r,p.soundHole.r).translate([0,p.soundHole.cy,-1])];
+  /* 音孔只开面板（吉他式）：有腔体时仅切顶壁，背板完整；
+     无腔体（老模型）保持全厚度贯通 */
+  const shCut=p.cavity?p.wall:p.thickness+2;
+  const shZ=p.cavity?p.thickness-p.wall-1:-1;
+  const holes=[Manifold.cylinder(shCut,p.soundHole.r,p.soundHole.r).translate([0,p.soundHole.cy,shZ])];
   for(let i=0;i<p.stringHoles.n;i++)
     holes.push(Manifold.cylinder(p.thickness+2,p.stringHoles.r,p.stringHoles.r)
       .translate([(i-(p.stringHoles.n-1)/2)*p.stringHoles.gap,p.stringHoles.cy,-1]));

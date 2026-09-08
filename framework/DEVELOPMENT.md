@@ -67,6 +67,8 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 
 **琴弦走线与布尔干涉断言**（`stringPath()` + `buildStrings()`）：
 - 走线：出弦孔内锚点 → 品条后缘上方 → 品条顶（留 0.8mm 间隙）→ 柱前表面缠绕（柱头顶面之下）
+- ⚠️ 音孔只开面板：有 cavity 时音孔圆柱仅切顶壁（`thickness-wall-1` 起），背板必须完整封闭
+  （吉他式腔体）；无 cavity 的老模型保持全厚度贯通
 - 每段 = 两球凸包（`Manifold.hull`）成胶囊；弦是实体，可被布尔检查
 - **每次重建都做 `strings.intersect(琴体/调音柱).volume()` 断言，>0.5mm³ 直接报错上屏**
 - 穿弦孔 cy 已从 -101.5 移到 **-106**：原位置在品条 footprint 下面，弦出来会撞品条（几何设计冲突）
