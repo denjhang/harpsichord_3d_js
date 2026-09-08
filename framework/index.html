@@ -440,20 +440,24 @@ $("exportCopy").onclick=async()=>{
 };
 $("ptitle").onclick=()=>$("panel").classList.toggle("collapsed");
 
-/* 视角快捷按钮：⌂ 默认视角 ｜ ⛶ 按当前视角比例缩放到合适窗口 */
-$("homeBtn").onclick=()=>{
+/* 视角快捷按钮（任意状态单点生效）：
+   ⌂ 默认视角 = 角度 + 中心点 + 距离 全部复位
+   ⛶ 最佳缩放 = 只调中心点（物体包围球球心）+ 距离，视角角度不动 */
+const fitDistOf=radius=>{
   const fV=camera.fov*Math.PI/180, fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
-  const rad=Math.max(125, BODY_TOP);
-  const d=(rad*1.18)/Math.tan(Math.min(fV,fH)/2);
-  animCam(DEF_VIEW.yaw, DEF_VIEW.pitch, DEF_VIEW.roll,
-    {target:new THREE.Vector3(0,BODY_TOP/4,0), dist:d});   // H5 中心=热床面与物体中心中点
+  return (radius*1.15)/Math.tan(Math.min(fV,fH)/2);      // 恰好入窗，留 15% 边距
+};
+$("homeBtn").onclick=()=>{
+  animCam(DEF_VIEW.yaw, DEF_VIEW.pitch, DEF_VIEW.roll, {
+    target:new THREE.Vector3(0,BODY_TOP/4,0),            // H5 中心=热床面与物体中心中点
+    dist:fitDistOf(Math.max(125, BODY_TOP)),             // H5 半径=max(床半宽, 琴体全高)
+  });
 };
 $("fitBtn").onclick=()=>{
-  if(!current) return;
-  const sph=new THREE.Box3().setFromObject(current).getBoundingSphere(new THREE.Sphere());
-  const fV=camera.fov*Math.PI/180, fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
-  const d=(sph.radius*1.15)/Math.tan(Math.min(fV,fH)/2);   // 当前视角下物体恰好入窗
-  animCam(yaw, pitch, roll, {dist:d});
+  const sph=current
+    ? new THREE.Box3().setFromObject(current).getBoundingSphere(new THREE.Sphere())
+    : {center:target.clone(), radius:150};               // 模型未建好也可用，绝不静默失效
+  animCam(yaw, pitch, roll, {target:sph.center, dist:fitDistOf(sph.radius)});
 };
 
 /* AI 直操接口：window.__model（与按钮共用逻辑；自动化/脚本无需碰 UI） */
