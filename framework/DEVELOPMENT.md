@@ -57,6 +57,21 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 - 校验覆盖：必填字段、正数约束、bezierSegs 每段 6 数字、units 只支持 mm
 - 内核与页面解耦后，同一份 JSON 也能在 Node 里跑（`import {buildBody} from "./src/lyre.build.mjs"`）
 
+### AI 直操接口（window.__model，自动化不碰 UI，与按钮共用同一逻辑）
+
+```js
+await __model.get()                    // → 当前生效的模型 JSON 文本
+await __model.set(text|object)         // 校验+生效+重建 → {ok, info|errors}
+__model.json                           // 对象形式的 getter/setter（setter 即 set）
+__model.validate(text?)                // → 错误数组（空=通过）
+await __model.load("lyre.model.json")  // 从 framework/ 目录载入并重建
+await __model.save()                   // 回写 framework/lyre.model.json → {ok, saved}
+await __model.exportCopy(name?)        // 副本到 out/（默认带时间戳）→ {ok, saved}
+await __exportSTL()                    // 导出 STL 到 out/lyre_body.stl（已有）
+```
+约定：**所有接口返回 `{ok, ...}` 对象而非抛异常**，自动化脚本靠返回值判断；
+非法模型一律被 validate 拦截，绝不让页面进入坏状态。
+
 ## 3. 参数模型（lyre.model.json）
 
 ```jsonc

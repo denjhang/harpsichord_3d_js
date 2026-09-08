@@ -399,7 +399,7 @@ const silentSave=async(name,data)=>{                     // 统一走服务器�
 ptext.addEventListener("input",()=>{
   pdirty.textContent = ptext.value!==modelText ? "（未应用修改）" : "";
 });
-$("apply").onclick=()=>{ modelText=ptext.value; pdirty.textContent=""; refresh(); };
+$("apply").onclick=()=>applyModelText(ptext.value);      // 与 AI 接口共用同一入口
 $("importFile").onclick=()=>$("filein").click();
 $("filein").addEventListener("change",async e=>{
   const f=e.target.files[0]; if(!f) return;
@@ -426,6 +426,50 @@ $("exportCopy").onclick=async()=>{
   }catch(e){ hud.textContent="❌ 导出失败："+e.message; }
 };
 $("ptitle").onclick=()=>$("panel").classList.toggle("collapsed");
+
+/* AI 直操接口：window.__model（与按钮共用逻辑；自动化/脚本无需碰 UI） */
+const applyModelText=async(text)=>{                      // 校验+生效+重建，返回结果对象
+  try{
+    const errs=validateModel(JSON.parse(text));
+    if(errs.length) return {ok:false, errors:errs};
+  }catch(e){ return {ok:false, errors:["JSON 解析失败："+e.message]}; }
+  modelText=text; ptext.value=text; pdirty.textContent="";
+  errBox.textContent="";
+  try{
+    const msg=await build();
+    hud.textContent=`里拉琴 · Manifold 内核 ✅\n打印比例 1:1.35（240mm / 250 热床）\n${msg}`;
+    return {ok:true, info:msg};
+  }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); return {ok:false, errors:[String(e.message||e)]}; }
+};
+window.__model={
+  get:()=>modelText,                                     // 当前生效的模型 JSON 文本
+  validate:(text)=>{ try{return validateModel(JSON.parse(text??modelText));}
+                    catch(e){return ["JSON 解析失败："+e.message];} },
+  set:(text)=>applyModelText(typeof text==="string"?text:JSON.stringify(text,null,2)),
+  load:async(name="lyre.model.json")=>{                  // 从服务器目录载入并重建
+    const r=await fetch("./"+name+"?v="+Date.now());
+    if(!r.ok) return {ok:false, errors:["HTTP "+r.status]};
+    return applyModelText(await r.text());
+  },
+  save:async()=>{                                        // 回写 framework/lyre.model.json
+    try{
+      const r=await fetch("/savemodel",{method:"POST",body:modelText});
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const j=await r.json(); return {ok:true, saved:j.saved};
+    }catch(e){ return {ok:false, errors:[String(e.message||e)]}; }
+  },
+  exportCopy:async(name)=>{                              // 导出带时间戳副本到 out/
+    try{
+      const stamp=new Date().toISOString().replace(/[:T]/g,"-").slice(0,19);
+      const j=await silentSave(name||`lyre_${stamp}.model.json`,modelText);
+      return {ok:true, saved:j.saved};
+    }catch(e){ return {ok:false, errors:[String(e.message||e)]}; }
+  },
+};
+Object.defineProperty(window.__model,"json",{            // 便捷：直接取/存对象形式
+  get:()=>JSON.parse(modelText),
+  set:(o)=>applyModelText(JSON.stringify(o,null,2)),
+});
 
 window.__exportSTL=async()=>{
   if(!current) return;
