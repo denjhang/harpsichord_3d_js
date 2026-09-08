@@ -440,24 +440,27 @@ $("exportCopy").onclick=async()=>{
 };
 $("ptitle").onclick=()=>$("panel").classList.toggle("collapsed");
 
-/* 视角快捷按钮（任意状态单点生效）：
-   ⌂ 默认视角 = 角度 + 中心点 + 距离 全部复位
-   ⛶ 最佳缩放 = 只调中心点（物体包围球球心）+ 距离，视角角度不动 */
-const fitDistOf=radius=>{
+/* 视角快捷按钮（任意状态单点生效）。参考构图：目标物水平投影占窗口约 63%（用户参考图）。
+   ⌂ 默认视角 = 角度复位 + 中心点(热床面与物体中点) + 距离（以热床为构图基准）
+   ⛶ 最佳缩放 = 角度不动，只调中心点(物体包围盒中心) + 距离（以物体为构图基准） */
+const REF_FRAC=0.63;
+const fitDistOf=size=>{                                  // size:包围盒尺寸(x,y 水平, z-up)
   const fV=camera.fov*Math.PI/180, fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
-  return (radius*1.15)/Math.tan(Math.min(fV,fH)/2);      // 恰好入窗，留 15% 边距
+  const extH=size.x*Math.abs(Math.sin(yaw))+size.y*Math.abs(Math.cos(yaw));
+  return extH/(REF_FRAC*2*Math.tan(fH/2));
 };
 $("homeBtn").onclick=()=>{
   animCam(DEF_VIEW.yaw, DEF_VIEW.pitch, DEF_VIEW.roll, {
-    target:new THREE.Vector3(0,BODY_TOP/4,0),            // H5 中心=热床面与物体中心中点
-    dist:fitDistOf(Math.max(125, BODY_TOP)),             // H5 半径=max(床半宽, 琴体全高)
+    target:new THREE.Vector3(0,BODY_TOP/4,0),
+    dist:fitDistOf(new THREE.Vector3(250,250,3)),        // 以热床为基准
   });
 };
 $("fitBtn").onclick=()=>{
-  const sph=current
-    ? new THREE.Box3().setFromObject(current).getBoundingSphere(new THREE.Sphere())
-    : {center:target.clone(), radius:150};               // 模型未建好也可用，绝不静默失效
-  animCam(yaw, pitch, roll, {target:sph.center, dist:fitDistOf(sph.radius)});
+  const box=new THREE.Box3();
+  if(current) box.setFromObject(current); else box.set(
+    new THREE.Vector3(-90,0,0), new THREE.Vector3(90,BODY_TOP,0));  // 兜底，绝不静默失效
+  const center=box.getCenter(new THREE.Vector3());
+  animCam(yaw, pitch, roll, {target:center, dist:fitDistOf(box.getSize(new THREE.Vector3()))});
 };
 
 /* AI 直操接口：window.__model（与按钮共用逻辑；自动化/脚本无需碰 UI） */
