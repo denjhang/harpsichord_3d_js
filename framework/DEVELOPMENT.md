@@ -37,7 +37,7 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 |---|---|
 | `lyre.model.json` | 参数单一来源。页面内改（JSON 面板）或直接改文件后点"重建" |
 | `index.html` | 查看器 + 热床/导航立方体 UI + **模型 JSON 面板**（编辑/校验/导入/导出/回写） |
-| `src/lyre.build.mjs` | **几何内核**：`validateModel(json)` 校验 + `buildBody(json)` 建模，与 UI 解耦，Node 可复用 |
+| `src/lyre.build.mjs` | **几何内核**：`validateModel` / `buildBody(model,{pegHoles})` / `buildPegs` / `pegPositions`，与 UI 解耦，Node 可复用 |
 | `server.py` | `python framework/server.py 8765`：静态服务 + `POST /save?name=` 存 out/ + `POST /savemodel` 回写模型文件 |
 | `out/` | STL / JSON 副本输出目录（gitignore） |
 | `../lab/node_modules/` | manifold-3d + three 本地依赖（npmmirror 安装） |
@@ -55,6 +55,19 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 
 - 文本区改动未应用时标题旁显示"（未应用修改）"
 - 校验覆盖：必填字段、正数约束、bezierSegs 每段 6 数字、units 只支持 mm
+
+### 组件系统（左侧"组件"清单，勾选/取消即生效）
+
+| 组件 | 性质 | 取消勾选的行为 | 进 STL？ |
+|---|---|---|---|
+| 琴体 | Manifold 实体 | 重建（不渲染琴体） | ✅ 可见即导出 |
+| 调音柱孔洞 | 琴体上的布尔穿孔 | **重建几何**（genus 31→17） | ✅（随琴体） |
+| 调音柱体 | Manifold 实体（柱身+柱头，×7） | 仅隐藏 | ✅ 可见即导出 |
+| 琴弦 | three.js 视觉件（非实体） | 仅隐藏 | ❌ 永不导出 |
+
+- 导出 STL = **当前可见的可打印组件合并**（琴体+调音柱），隐藏件自动排除
+- 新增参数：`params.pegs{n,gap,r,headR,h,headH,y}`、`params.pegHoles.r`、`params.strings.r`
+- 调音柱孔位与穿弦孔同 x 对齐（`pegPositions()` 共用 gap/n），体现"单一数据源"约束
 - 内核与页面解耦后，同一份 JSON 也能在 Node 里跑（`import {buildBody} from "./src/lyre.build.mjs"`）
 
 ### AI 直操接口（window.__model，自动化不碰 UI，与按钮共用同一逻辑）

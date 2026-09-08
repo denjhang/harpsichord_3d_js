@@ -14,7 +14,7 @@
   #cube{position:fixed;top:14px;right:14px;width:132px;height:132px;cursor:pointer}
   #bar{position:fixed;bottom:40px;right:14px;display:flex;gap:8px}
   button{padding:8px 16px;font-size:14px;cursor:pointer}
-  #err{position:fixed;top:160px;left:20px;right:160px;color:#b03030;font-size:12px;white-space:pre-wrap;pointer-events:none}
+  #err{position:fixed;top:250px;left:20px;right:160px;color:#b03030;font-size:12px;white-space:pre-wrap;pointer-events:none}
   #panel{position:fixed;left:20px;bottom:44px;width:460px;background:rgba(250,250,250,.88);
     border:1px solid rgba(90,85,78,.35);border-radius:10px;padding:10px 12px;backdrop-filter:blur(4px)}
   #panel.collapsed #pbody{display:none}
@@ -30,6 +30,13 @@
   #viewbtns button{width:40px;height:40px;border-radius:50%;font-size:19px;padding:0;
     background:rgba(250,250,250,.85);border:1px solid #a89f90;color:#4a453e;line-height:1}
   #viewbtns button:hover{background:#efece5}
+  #comps{position:fixed;top:120px;left:20px;width:150px;background:rgba(250,250,250,.88);
+    border:1px solid rgba(90,85,78,.35);border-radius:10px;padding:8px 12px;backdrop-filter:blur(4px)}
+  #comps h3{margin:0 0 6px;color:#4a453e;font-size:13px;letter-spacing:1px;font-weight:bold}
+  #comps label{display:flex;align-items:center;gap:7px;color:#55504a;font-size:13px;
+    padding:3px 0;cursor:pointer;user-select:none}
+  #comps label:hover{color:#3a362f}
+  #comps input{accent-color:#8a7d63;cursor:pointer}
 </style>
 <script type="importmap">
 {"imports":{"three":"../lab/node_modules/three/build/three.module.js",
@@ -39,6 +46,13 @@
 </head>
 <body>
 <div id="hud"></div>
+<div id="comps">
+  <h3>组件</h3>
+  <label><input type="checkbox" id="cb-body" checked>琴体</label>
+  <label><input type="checkbox" id="cb-pegHoles" checked>调音柱孔洞</label>
+  <label><input type="checkbox" id="cb-pegs" checked>调音柱体</label>
+  <label><input type="checkbox" id="cb-strings" checked>琴弦</label>
+</div>
 <div id="err"></div>
 <div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 右上角立方体=<span>快速视角</span></div>
 <canvas id="cube" width="264" height="264" style="width:132px;height:132px"></canvas>
@@ -366,21 +380,60 @@ function stepCube(t){
 }
 
 /* ================= 里拉建模（几何内核 = src/lyre.build.mjs，页面只管输入输出）================= */
-import { buildBody, validateModel } from "./src/lyre.build.mjs";
-let current=null, modelText=null;                        // modelText：当前生效的模型 JSON 文本（单一数据源）
-async function build(){
-  const model=JSON.parse(modelText);
-  const errs=validateModel(model);
-  if(errs.length) throw new Error("模型校验失败：\n· "+errs.join("\n· "));
-  const {mesh,info}=await buildBody(model);
-  if(current){scene.remove(current);current.geometry.dispose();}
+import { buildBody, buildPegs, validateModel, pegPositions } from "./src/lyre.build.mjs";
+let current=null, pegMesh=null, stringGroup=null;
+let modelText=null;                                      // 当前生效的模型 JSON 文本（单一数据源）
+const MAT_BODY=()=>new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7});
+const MAT_PEG =()=>new THREE.MeshStandardMaterial({color:0x5c4a38,roughness:.55,metalness:.15});
+const MAT_STR =()=>new THREE.MeshStandardMaterial({color:0xb9bdc6,roughness:.35,metalness:.85});
+const comp={body:true, pegs:true, pegHoles:true, strings:true};   // 组件清单状态
+function setMesh(mesh,mat){                              // manifold mesh → three 网格
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(new Float32Array(mesh.vertProperties),3));
   g.setIndex(Array.from(mesh.triVerts));
   g.computeVertexNormals();
-  current=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:0xd9c49a,roughness:.7}));
-  scene.add(current);
-  return info;
+  return new THREE.Mesh(g,mat);
+}
+async function build(){
+  const model=JSON.parse(modelText);
+  const errs=validateModel(model);
+  if(errs.length) throw new Error("模型校验失败：\n· "+errs.join("\n· "));
+  if(current){scene.remove(current);current.geometry.dispose();current=null;}
+  if(pegMesh){scene.remove(pegMesh);pegMesh.geometry.dispose();pegMesh=null;}
+  if(stringGroup){scene.remove(stringGroup);
+    stringGroup.children.forEach(s=>s.geometry.dispose());stringGroup=null;}
+  const parts=[];
+  if(comp.body){
+    const {mesh,info}=await buildBody(model,{pegHoles:comp.pegHoles});
+    current=setMesh(mesh,MAT_BODY());
+    current.visible=comp.body;
+    scene.add(current);
+    parts.push(info);
+  }
+  if(comp.pegs && model.params.pegs){
+    const {mesh,info}=await buildPegs(model);
+    pegMesh=setMesh(mesh,MAT_PEG());
+    pegMesh.visible=comp.pegs;
+    scene.add(pegMesh);
+    parts.push(info);
+  }
+  if(comp.strings && model.params.strings){
+    const p=model.params, g=p.strings;
+    stringGroup=new THREE.Group();                       // 琴弦：纯视觉，永不进 STL
+    for(const [px,py] of pegPositions(p)){
+      const a=new THREE.Vector3(px,p.stringHoles.cy,p.thickness*0.5);
+      const b=new THREE.Vector3(px,p.pegs.y+2,p.thickness+p.pegs.h);
+      const len=a.distanceTo(b);
+      const s=new THREE.Mesh(new THREE.CylinderGeometry(g.r,g.r,len,10),MAT_STR());
+      s.position.copy(a).add(b).multiplyScalar(.5);
+      s.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),
+        b.clone().sub(a).normalize());
+      stringGroup.add(s);
+    }
+    scene.add(stringGroup);
+    parts.push(`琴弦×${stringGroup.children.length}（仅显示，不导出）`);
+  }
+  return parts.join("\n");
 }
 
 /* ================= 主循环 ================= */
@@ -395,11 +448,27 @@ function frame(t){
 async function refresh(){
   errBox.textContent="";
   try{
-    const msg=await build();
-    hud.textContent=`里拉琴 · Manifold 内核 ✅\n打印比例 1:1.35（240mm / 250 热床）\n${msg}`;
+    const parts=await build();
+    hud.textContent=`里拉琴 · Manifold 内核 ✅\n打印比例 1:1.35（240mm / 250 热床）\n${parts}`;
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
 }
 document.getElementById("rebuild").onclick=refresh;
+
+/* 组件清单：琴体/调音孔改动几何需重建，调音柱/琴弦只切可见性 */
+const REBUILD_ON={pegHoles:true, body:true};             // 影响几何的开关
+for(const key of ["body","pegHoles","pegs","strings"]){
+  document.getElementById("cb-"+key).addEventListener("change",e=>{
+    comp[key]=e.target.checked;
+    if(REBUILD_ON[key]) refresh();
+    else{
+      const m=key==="pegs"?pegMesh:stringGroup;
+      if(m) m.visible=comp[key];
+      hud.textContent=(comp[key]?"✅ 显示 ":"⬜ 隐藏 ")+
+        {pegs:"调音柱",strings:"琴弦"}[key]+
+        "（导出 STL 时同样排除隐藏件）";
+    }
+  });
+}
 
 /* ================= 模型 JSON 面板：导入 / 导出 / 校验 / 回写 ================= */
 const $=id=>document.getElementById(id);
@@ -534,13 +603,17 @@ Object.defineProperty(window.__model,"json",{            // 便捷：直接取/�
 });
 
 window.__exportSTL=async()=>{
-  if(!current) return;
-  const txt=new STLExporter().parse(current);
+  const printable=[current,pegMesh].filter(m=>m&&m.visible);   // 琴弦非打印件，永不导出
+  if(!printable.length){ hud.textContent="⬜ 没有可见的可打印组件（琴体/调音柱）"; return; }
+  const holder=new THREE.Group();                        // 本版本 STLExporter 需要 Object3D
+  for(const m of printable) holder.add(m);
+  const txt=new STLExporter().parse(holder);
+  for(const m of printable) scene.add(m);                // 归还场景（parse 不改父级，保险起见）
   try{                                                   // 静默 POST 到本地服务器存盘，绝不弹窗
     const r=await fetch("/save?name=lyre_body.stl", {method:"POST", body:txt});
     if(!r.ok) throw new Error("HTTP "+r.status);
     const j=await r.json();
-    hud.textContent=`✅ STL 已保存：${j.saved}（${j.bytes} 字节）`;
+    hud.textContent=`✅ STL 已保存：${j.saved}（${j.bytes} 字节，组件×${printable.length}）`;
   }catch(e){
     hud.textContent="❌ 保存失败（需用 framework/server.py 启动服务）："+e.message;
   }

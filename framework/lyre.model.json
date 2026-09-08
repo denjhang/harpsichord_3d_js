@@ -32,6 +32,21 @@
       "rx": 34,
       "ry": 47.3,
       "SAMPLE": 48
+    },
+    "pegs": {
+      "n": 7,
+      "gap": 11.4,
+      "r": 4,
+      "headR": 6,
+      "h": 16,
+      "headH": 5,
+      "y": 108
+    },
+    "pegHoles": {
+      "r": 2
+    },
+    "strings": {
+      "r": 0.6
     }
   },
   "outline": {

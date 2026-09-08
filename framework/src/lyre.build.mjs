@@ -32,8 +32,18 @@ export function validateModel(m){
   return errs;
 }
 
-/** 由模型 JSON 构建实体，返回 { body(Manifold), mesh, info } */
-export async function buildBody(model){
+/** 调音柱孔位（mm）：与穿弦孔对齐，排在顶部横梁上 */
+export function pegPositions(p){
+  const g=p.pegs;
+  const out=[];
+  for(let i=0;i<g.n;i++)
+    out.push([(i-(g.n-1)/2)*g.gap, g.y]);
+  return out;
+}
+
+/** 由模型 JSON 构建琴体，返回 { body(Manifold), mesh, info }
+ *  opts.pegHoles=false 时不打调音孔（组件清单可切换） */
+export async function buildBody(model, opts={}){
   const wasm = await Module(); wasm.setup?.();
   const { Manifold, CrossSection, setMinCircularAngle } = wasm;
   setMinCircularAngle(6);
@@ -63,9 +73,31 @@ export async function buildBody(model){
     holes.push(Manifold.cylinder(p.thickness+2,p.stringHoles.r,p.stringHoles.r)
       .translate([(i-(p.stringHoles.n-1)/2)*p.stringHoles.gap,p.stringHoles.cy,-1]));
   for(const h of holes) body=body.subtract(h);
+  if(opts.pegHoles!==false && p.pegHoles){               // 调音柱穿孔（与柱同轴）
+    for(const [px,py] of pegPositions(p))
+      body=body.subtract(Manifold.cylinder(p.thickness+2,p.pegHoles.r,p.pegHoles.r)
+        .translate([px,py,-1]));
+  }
   body=body.add(Manifold.cube([p.bridge.w,p.bridge.d,p.bridge.h],true)
     .translate([0,p.bridge.y,p.thickness+p.bridge.h/2]));
-  if(String(body.status())!=="NoError") throw new Error("Manifold 布尔结果异常: status="+body.status());
+  const NoError="NoError";
+  if(String(body.status())!==NoError) throw new Error("Manifold 布尔结果异常: status="+body.status());
   return { body, mesh:body.getMesh(),
     info:`status:${body.status()}  genus:${body.genus()}  tri:${body.numTri()}  体积:${(body.volume()/1000).toFixed(1)}cm³` };
+}
+
+/** 调音柱（可打印实体）：柱体+加粗柱头，立在琴体顶面。返回 { body, mesh, info } */
+export async function buildPegs(model){
+  const wasm = await Module(); wasm.setup?.();
+  const { Manifold } = wasm;
+  const p=model.params, g=p.pegs;
+  let pegs=null;
+  for(const [px,py] of pegPositions(p)){
+    const m=Manifold.cylinder(g.h,g.r,g.r).translate([px,py,p.thickness])
+      .add(Manifold.cylinder(g.headH,g.headR,g.headR).translate([px,py,p.thickness+g.h]));
+    pegs=pegs?pegs.add(m):m;
+  }
+  if(String(pegs.status())!=="NoError") throw new Error("调音柱布尔异常: status="+pegs.status());
+  return { body:pegs, mesh:pegs.getMesh(),
+    info:`调音柱×${g.n}  tri:${pegs.numTri()}  体积:${(pegs.volume()/1000).toFixed(1)}cm³` };
 }
