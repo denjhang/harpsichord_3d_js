@@ -52,6 +52,9 @@
     padding:16px;overflow-y:auto;transition:transform .25s}
   body.sideClosed #sidebar{transform:translateX(-100%)}
   #sidebar #comps,#sidebar #panel{position:static;width:auto;background:none;border:none;backdrop-filter:none}
+  #msginfo{margin-bottom:16px;padding-bottom:10px;border-bottom:1px dashed rgba(90,85,78,.3)}
+  #msginfo h3{margin:0 0 6px;color:#4a453e;font-size:13px;letter-spacing:1px;font-weight:bold}
+  #infobody{color:#55504a;font-size:11.5px;line-height:1.7;white-space:pre-line;word-break:break-all}
   #sidebar #comps{margin-bottom:16px}
   #comps details{margin-bottom:8px}
   #comps summary{color:#3a362f;font-size:12.5px;cursor:pointer;user-select:none;padding:2px 0}
@@ -97,6 +100,10 @@
 <body>
 <div id="hud"></div>
 <div id="sidebar">
+<div id="msginfo">
+  <h3>信息</h3>
+  <div id="infobody"></div>
+</div>
 <div id="comps"></div>
 <div id="panel">
   <div id="ptitle"><b>模型 JSON</b> <span id="psrc"></span> <span class="dirty" id="pdirty"></span></div>
@@ -644,9 +651,11 @@ async function refresh(){
   errBox.textContent="";
   try{
     const checks=await buildAll();
-    const lines=["Lyre 3D JS · Manifold 内核 ✅"];
+    const lines=[];
     for(const [name,f] of files) lines.push("【"+name+"】"+(f.info||""));
-    hud.textContent=lines.join("\n")+"布尔检查: "+(checks.join(" · ")||"（单文件无对检）");
+    lines.push("布尔检查: "+(checks.join(" · ")||"（单文件无对检）"));
+    hud.textContent="Lyre 3D JS · Manifold 内核 ✅";
+    document.getElementById("infobody").textContent=lines.join("\n");
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
 }
 document.getElementById("rebuild").onclick=refresh;
