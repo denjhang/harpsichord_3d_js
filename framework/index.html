@@ -26,6 +26,10 @@
   #pbtns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
   #pbtns button{padding:5px 12px;font-size:12.5px;background:#efece5;border:1px solid #a89f90;border-radius:6px;color:#4a453e}
   #pbtns button:hover{background:#e5e0d4}
+  #viewbtns{position:fixed;top:156px;right:14px;display:flex;flex-direction:column;gap:8px}
+  #viewbtns button{width:40px;height:40px;border-radius:50%;font-size:19px;padding:0;
+    background:rgba(250,250,250,.85);border:1px solid #a89f90;color:#4a453e;line-height:1}
+  #viewbtns button:hover{background:#efece5}
 </style>
 <script type="importmap">
 {"imports":{"three":"../lab/node_modules/three/build/three.module.js",
@@ -39,6 +43,10 @@
 <div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 右上角立方体=<span>快速视角</span></div>
 <canvas id="cube" width="264" height="264" style="width:132px;height:132px"></canvas>
 <div id="bar"><button id="rebuild">重建</button><button id="stl">导出 STL</button></div>
+<div id="viewbtns">
+  <button id="homeBtn" title="回到默认视角" aria-label="回到默认视角">⌂</button>
+  <button id="fitBtn" title="最佳窗口缩放" aria-label="最佳窗口缩放">⛶</button>
+</div>
 <div id="panel" class="collapsed">
   <div id="ptitle"><b>模型 JSON</b> <span id="psrc"></span> <span class="dirty" id="pdirty"></span></div>
   <div id="pbody">
@@ -335,17 +343,22 @@ cubeCv.addEventListener("pointermove",e=>{
   cubeCv.style.cursor=hitItems.some(it=>cg.isPointInPath(it.path,x,y))?"pointer":"default";
 });
 let camAnim=null;
-function animCam(ty,tp,tr=roll){
-  const s={yaw,pitch,roll,dist};
+const DEF_VIEW={yaw:.7, pitch:.5, roll:0};               // H5 默认轴测视角
+function animCam(ty,tp,tr=roll,opts={}){                 // opts.target/dist 参与平滑过渡
+  const s={yaw,pitch,roll,dist,target:target.clone()};
   const dYaw=((ty-s.yaw+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
   const dRoll=((tr-s.roll+Math.PI)%(2*Math.PI)+2*Math.PI)%(2*Math.PI)-Math.PI;
-  camAnim={t0:performance.now(),dur:450,s,dYaw,tp:tp-pitch,dRoll};
+  camAnim={t0:performance.now(),dur:450,s,dYaw,tp:tp-pitch,dRoll,
+    dTarget:opts.target?opts.target.clone().sub(target):null,
+    dDist:opts.dist!=null?opts.dist-dist:0};
 }
 function stepCube(t){
   if(camAnim){
     const k=Math.min(1,(t-camAnim.t0)/camAnim.dur), e=1-Math.pow(1-k,3);
     yaw=camAnim.s.yaw+camAnim.dYaw*e; pitch=camAnim.s.pitch+camAnim.tp*e;
     roll=camAnim.s.roll+camAnim.dRoll*e;
+    if(camAnim.dTarget) target.copy(camAnim.s.target).addScaledVector(camAnim.dTarget,e);
+    if(camAnim.dDist) dist=camAnim.s.dist+camAnim.dDist*e;
     if(k>=1)camAnim=null;
     applyCam();
   }
@@ -426,6 +439,22 @@ $("exportCopy").onclick=async()=>{
   }catch(e){ hud.textContent="❌ 导出失败："+e.message; }
 };
 $("ptitle").onclick=()=>$("panel").classList.toggle("collapsed");
+
+/* 视角快捷按钮：⌂ 默认视角 ｜ ⛶ 按当前视角比例缩放到合适窗口 */
+$("homeBtn").onclick=()=>{
+  const fV=camera.fov*Math.PI/180, fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
+  const rad=Math.max(125, BODY_TOP);
+  const d=(rad*1.18)/Math.tan(Math.min(fV,fH)/2);
+  animCam(DEF_VIEW.yaw, DEF_VIEW.pitch, DEF_VIEW.roll,
+    {target:new THREE.Vector3(0,BODY_TOP/4,0), dist:d});   // H5 中心=热床面与物体中心中点
+};
+$("fitBtn").onclick=()=>{
+  if(!current) return;
+  const sph=new THREE.Box3().setFromObject(current).getBoundingSphere(new THREE.Sphere());
+  const fV=camera.fov*Math.PI/180, fH=2*Math.atan(Math.tan(fV/2)*camera.aspect);
+  const d=(sph.radius*1.15)/Math.tan(Math.min(fV,fH)/2);   // 当前视角下物体恰好入窗
+  animCam(yaw, pitch, roll, {dist:d});
+};
 
 /* AI 直操接口：window.__model（与按钮共用逻辑；自动化/脚本无需碰 UI） */
 const applyModelText=async(text)=>{                      // 校验+生效+重建，返回结果对象
