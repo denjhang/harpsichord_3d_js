@@ -84,7 +84,7 @@ export async function buildBody(model, opts={}){
   }
   /* 音孔只开面板（吉他式）：有腔体时仅切顶壁，背板完整；
      无腔体（老模型）保持全厚度贯通 */
-  const shCut=p.cavity?p.wall:p.thickness+2;
+  const shCut=p.cavity?p.wall+2:p.thickness+2;           // 顶壁厚+2：下探入腔、上露出面
   const shZ=p.cavity?p.thickness-p.wall-1:-1;
   const holes=[Manifold.cylinder(shCut,p.soundHole.r,p.soundHole.r).translate([0,p.soundHole.cy,shZ])];
   for(let i=0;i<p.stringHoles.n;i++)

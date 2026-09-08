@@ -680,7 +680,8 @@ document.getElementById("stl").onclick=window.__exportSTL;
 addEventListener("resize",()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
   renderer.setSize(innerWidth,innerHeight);fitView();applyCam();});
 fitView(); applyCam();
-window.__view = { get camera(){return camera;}, get scene(){return scene;}, get current(){return current;} };
+window.__view = { get camera(){return camera;}, get scene(){return scene;}, get current(){return current;},
+  Raycaster: THREE.Raycaster, Vector3: THREE.Vector3 };
 (async()=>{                                              // 启动：载入模型 JSON 到面板，再首建
   try{
     modelText = await (await fetch("./lyre.model.json?v="+Date.now())).text();
