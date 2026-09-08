@@ -10,3 +10,9 @@
 3. `Manifold.subtract(other)` 只收**单个** Manifold，多个孔逐个 subtract
 4. `makeThickSolid...`（Chili3D/OCCT 系）与 Manifold 的 Offset 抽壳是两码事；本框架用轻量内缩相减
 5. 白屏排查：页面加载即执行，任何未捕获异常都会卡在初始 UI——关键路径必须 try/catch 把错误打到页面
+
+## H5 移植对照要点
+- 导航立方体 `proj` 用旋转结果的**第 1 分量**做屏幕竖直（r[1]），抄成 r[2]（深度）会只画一半
+- z-up 场景 BoxGeometry 顶面材质索引 = 4（+Z），y-up 才是 2
+- `Manifold.subtract` 单参数；`CrossSection` 收元组数组
+- STL 导出：STLExporter + download 事件已验证可用

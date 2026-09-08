@@ -175,7 +175,7 @@ function drawCube(){
   const reg=(path,act,tip="")=>hitItems.push({path,act,tip});
   cg.fillStyle="rgba(250,250,250,.75)"; cg.beginPath(); cg.arc(c,c,116,0,7); cg.fill();
   cg.strokeStyle="rgba(90,85,78,.35)"; cg.lineWidth=2; cg.stroke();
-  const proj=r=>[c+r[0]*80, c-r[2]*80];
+  const proj=r=>[c+r[0]*80, c-r[1]*80];
   if(widgetMode==="cube"){
     const h=.6, rad=36, sk=.68;
     const mixHex=(a,b)=>{const pa=parseInt(a.slice(1),16),pb=parseInt(b.slice(1),16);
