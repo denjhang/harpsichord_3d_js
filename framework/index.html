@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Lyre 轻量参数化建模 · Manifold</title>
+<style>
+  body{margin:0;overflow:hidden;font-family:monospace;background:#dfe1e4}
+  #info{position:fixed;top:12px;left:14px;color:#333;font-size:13px;line-height:1.7;white-space:pre;pointer-events:none}
+  #bar{position:fixed;top:12px;right:14px;display:flex;gap:8px}
+  button{padding:8px 16px;font-size:14px;cursor:pointer}
+</style>
+<script type="importmap">
+{"imports":{"three":"../lab/node_modules/three/build/three.module.js",
+            "three/addons/":"../lab/node_modules/three/examples/jsm/",
+            "manifold-3d":"../lab/node_modules/manifold-3d/manifold.js"}}
+</script>
+</head>
+<body>
+<div id="info">loading…</div>
+<div id="bar"><button id="rebuild">重建</button><button id="stl">导出 STL</button></div>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { STLExporter } from "three/addons/exporters/STLExporter.js";
+import Module from "manifold-3d";
+
+const info = document.getElementById("info");
+const wasm = await Module(); wasm.setup();
+const { Manifold, CrossSection, setMinCircularAngle } = wasm;
+setMinCircularAngle(6);
+
+/* —— 参数化求值：model.json → Manifold 实体 —— */
+async function build() {
+  const model = await (await fetch("./lyre.model.json")).json();
+  const p = model.params;
+  const K = p.height / 32.5;                       // cm → mm（240/325）
+  const X = v => v * K, Y = v => (v - 16.25) * K;
+
+  // 1) 轮廓采样（贝塞尔链 → 点）
+  const bez = (p0,p1,p2,p3,t) => { const u=1-t; return [
+    u*u*u*p0[0]+3*u*u*t*p1[0]+3*u*t*t*p2[0]+t*t*t*p3[0],
+    u*u*u*p0[1]+3*u*u*t*p1[1]+3*u*t*t*p2[1]+t*t*t*p3[1]]; };
+  const pts = []; let cur = [0,.6];
+  for (const s of model.outline.bezierSegs) {
+    const p0=cur, p1=[s[0],s[1]], p2=[s[2],s[3]], p3=[s[4],s[5]];
+    for (let i=1;i<=24;i++){ const [x,y]=bez(p0,p1,p2,p3,i/24); pts.push([X(x), Y(y)]); }
+    cur = p3;
+  }
+  // 弦窗：大椭圆镂空（H5 设计要点：顶部留闭合横梁），顺时针绕行 → NonZero 规则下成孔
+  const win = [];
+  for (let i = p.window.SAMPLE; i >= 0; i--) {
+    const t = (i / p.window.SAMPLE) * Math.PI * 2;
+    win.push([p.window.cx + p.window.rx * Math.cos(t),
+              p.window.cy + p.window.ry * Math.sin(t)]);
+  }
+  const outer = new CrossSection([pts, win], "NonZero"); // SimplePolygon[]：外圈 + 弦窗
+
+  // 2) 外壳实体
+  let body = outer.extrude(p.thickness);
+
+  // 3) 轻量抽壳：内缩轮廓挤出后相减（上下/四周壁厚 = wall）
+  const inner = outer.offset(-p.wall, "Round").extrude(p.thickness - 2*p.wall)
+                     .translate([0, 0, p.wall]);
+  body = body.subtract(inner);
+
+  // 4) 孔：圆音孔 + 7 穿弦孔（z 全贯穿）
+  const holes = [ Manifold.cylinder(p.thickness+2, p.soundHole.r, p.soundHole.r)
+                     .translate([0, p.soundHole.cy, -1]) ];
+  for (let i=0;i<p.stringHoles.n;i++)
+    holes.push(Manifold.cylinder(p.thickness+2, p.stringHoles.r, p.stringHoles.r)
+      .translate([(i-(p.stringHoles.n-1)/2)*p.stringHoles.gap, p.stringHoles.cy, -1]));
+  for (const h of holes) body = body.subtract(h);
+
+  // 5) 品条（实体并到面上）
+  body = body.add(Manifold.cube([p.bridge.w, p.bridge.d, p.bridge.h], true)
+                     .translate([0, p.bridge.y, p.thickness + p.bridge.h/2]));
+
+  return { manifold: body, stats: {
+    volume_cm3: (body.volume()/1000).toFixed(1),
+    tri: body.numTri(), genus: body.genus(),
+    status: String(body.status()) } };
+}
+
+/* —— Manifold → three.js —— */
+let current = null;
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe1e4);
+const cam = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, .1, 2000);
+cam.position.set(180,-200,190); cam.up.set(0,0,1); cam.lookAt(0,0,110);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight); document.body.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff,.7));
+const key = new THREE.DirectionalLight(0xffffff,1.5); key.position.set(150,-120,250); scene.add(key);
+const grid = new THREE.GridHelper(500,10); scene.add(grid);
+new OrbitControls(cam, renderer.domElement);
+
+async function refresh() {
+  try {
+  const { manifold, stats } = await build();
+  if (current) { scene.remove(current); current.geometry.dispose(); }
+  const mesh = manifold.getMesh();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(mesh.vertProperties), 3));
+  g.setIndex(Array.from(mesh.triVerts));
+  g.computeVertexNormals();
+  current = new THREE.Mesh(g, new THREE.MeshStandardMaterial({color:0xd9c49a, roughness:.7}));
+  scene.add(current);
+  info.textContent =
+`Lyre · Manifold 内核 ✅
+status : ${stats.status}   genus: ${stats.genus}
+tri    : ${stats.tri}
+体积   : ${stats.volume_cm3} cm³（打印料）
+壁厚   : 2.4mm（轻量抽壳）`;
+  } catch(e) {
+    info.textContent = "❌ " + (e.stack || e.message);
+  }
+}
+window.__exportSTL = () => {
+  const txt = new STLExporter().parse(current);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([txt], {type:"model/stl"}));
+  a.download = "lyre_body.stl"; a.click();
+};
+document.getElementById("rebuild").onclick = refresh;
+document.getElementById("stl").onclick = window.__exportSTL;
+addEventListener("resize", ()=>{ cam.aspect=innerWidth/innerHeight; cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); });
+await refresh();
+function loop(){ renderer.render(scene,cam); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>
