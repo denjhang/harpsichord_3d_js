@@ -74,8 +74,14 @@ export async function buildBody(model, opts={}){
   }
   const outer=new CrossSection([pts,win],"NonZero");
   let body=outer.extrude(p.thickness);
-  const inner=outer.offset(-p.wall,"Round").extrude(p.thickness-2*p.wall).translate([0,0,p.wall]);
-  body=body.subtract(inner);
+  if(p.cavity){
+    /* 共振腔限定在下半部（params.cavity.top 以下）：其余琴体保持实心
+       （顶部横梁束弦、琴柱孔区需要强度）。内腔四壁+上下留 wall 壁厚。 */
+    const inner=outer.offset(-p.wall,"Round").extrude(p.thickness-2*p.wall).translate([0,0,p.wall]);
+    const region=Manifold.cube([320,160,p.thickness])
+      .translate([-160,-160,p.wall]);                     // y: -160 → 0（y>0 区域不挖空）
+    body=body.subtract(inner.intersect(region));
+  }
   const holes=[Manifold.cylinder(p.thickness+2,p.soundHole.r,p.soundHole.r).translate([0,p.soundHole.cy,-1])];
   for(let i=0;i<p.stringHoles.n;i++)
     holes.push(Manifold.cylinder(p.thickness+2,p.stringHoles.r,p.stringHoles.r)

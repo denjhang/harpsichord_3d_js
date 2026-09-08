@@ -47,6 +47,9 @@
     },
     "strings": {
       "r": 0.6
+    },
+    "cavity": {
+      "top": 0
     }
   },
   "outline": {

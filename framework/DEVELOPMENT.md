@@ -72,7 +72,18 @@ Manifold 实体（强制水密）  ──getMesh()──▶  three.js BufferGeom
 - 穿弦孔 cy 已从 -101.5 移到 **-106**：原位置在品条 footprint 下面，弦出来会撞品条（几何设计冲突）
 
 - 导出 STL = **当前可见的可打印组件合并**（琴体+调音柱），隐藏件自动排除
-- 新增参数：`params.pegs{n,gap,r,headR,h,headH,y}`、`params.pegHoles.r`、`params.strings.r`
+- 新增参数：`params.pegs{n,gap,r,headR,h,headH,y}`、`params.pegHoles.r`、`params.strings.r`、`params.cavity.top`
+
+### 底部滑块条（视图三件套）
+| 滑块 | 实现 |
+|---|---|
+| 热床透明 | bedMats 逐材质 opacity（0=全透明看穿床底） |
+| 装配 | t=1 装配到位 / t=0 解体：调音柱 +90mm、琴弦 +170mm 悬浮（BOM 装配动画，纯 position 不影响布尔） |
+| 模拟切片 | `renderer.localClippingEnabled` + 剖切平面保留 z≤h；只剖模型不剖热床；红色半透明面指示当前层高；材质 DoubleSide 才能看进内壁 |
+
+### 自动布尔检查（每次重建必跑）
+- 所有可见实体（琴体/调音柱/琴弦）**两两 `intersect().volume()`**，>0.5mm³ 即抛错上屏
+- 检查结果显示在 HUD（如 `琴体×琴弦 0.04`），用于抓穿模/干涉类几何错误
 - 调音柱孔位与穿弦孔同 x 对齐（`pegPositions()` 共用 gap/n），体现"单一数据源"约束
 - 内核与页面解耦后，同一份 JSON 也能在 Node 里跑（`import {buildBody} from "./src/lyre.build.mjs"`）
 
@@ -205,7 +216,8 @@ Manifold 内核的每次布尔输出都在数学上保证水密（NoError 断言
 - STL 无单位/材质信息（Manifold 官方建议 3MF，拓扑无损）——后续可加 3MF 导出
 - 抽壳是"轮廓内缩相减"轻量方案，凹腔深处的壁厚均匀性依赖轮廓曲率（当前琴体 OK）
 - 品条/音柱等附件目前是简单几何；可逐步参数化细化
-- 未做：参数滑杆 GUI（当前面板改 JSON 文本）、多零件装配拆件、3MF 导出
+- 未做：参数滑杆 GUI（当前面板改 JSON 文本）、多零件 parts[] 拆件、3MF 导出
+- 注意：白屏=模块级语法/加载错误，页面头部已有 window error 钩子上屏（LOAD ❌ 行）
 - 成为"完整框架"尚缺的必备能力（按优先级）：
   1. 多零件装配（model.parts[]：每个零件独立 JSON + 定位变换 + 零件间布尔/配合）
   2. 更多几何算子：revolve / loft / 圆角（Manifold 有 revolve；圆角需偏移方案）
