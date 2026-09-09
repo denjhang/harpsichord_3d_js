@@ -60,16 +60,29 @@
   #sidebar #comps{margin-bottom:16px}
   #comps details{margin-bottom:8px}
   #comps summary{color:#3a362f;font-size:12.5px;cursor:pointer;user-select:none;padding:2px 0}
+  #comps summary .caret{display:inline-block;width:16px;color:#8a7d63}
   #comps summary:hover{color:#1a1712}
   .comprow{display:flex;align-items:center;gap:6px;color:#55504a;font-size:12.5px;padding:2px 0 2px 10px}
   .comprow:hover{color:#1a1712;background:rgba(138,125,99,.12);border-radius:4px}
   .comprow input{accent-color:#8a7d63;cursor:pointer}
   .comprow .del{margin-left:auto;border:none;background:none;color:#a05545;cursor:pointer;font-size:12px;padding:0 4px}
   .comprow .del:hover{color:#c23b2e}
+  .comprow.selRow{background:rgba(154,90,16,.18);outline:1px solid #9a5a10}
+  .comprow.selRow{background:rgba(154,90,16,.18);outline:1px solid #9a5a10}
   .addbtn{margin:4px 0 0 10px;padding:2px 10px;font-size:12px;background:#efece5;
     border:1px dashed #a89f90;border-radius:6px;color:#4a453e;cursor:pointer}
   .addbtn:hover{background:#e5e0d4}
   details.sumactive summary{font-weight:bold;color:#1a1712}
+  #movebar{position:fixed;top:14px;left:calc(50% + 122px);z-index:10;
+    transform:translateX(-50%) translateZ(0);display:flex;align-items:center;gap:8px;
+    background:rgba(250,250,250,.95);border:1px solid #a89f90;border-radius:8px;padding:6px 12px}
+  #movebar .mvlabel{color:#4a453e;font-size:12.5px;font-weight:bold}
+  #movebar button[data-axis]{width:30px;height:26px;padding:0;font-size:12.5px;
+    background:#efece5;border:1px solid #a89f90;border-radius:5px;color:#4a453e}
+  #movebar button[data-axis].axisOn{background:#8a7d63;color:#fff;border-color:#8a7d63}
+  #movebar .hint{color:#8b857a;font-size:11.5px}
+  .comprow .mvname{cursor:move}
+  .comprow .mvname:hover{text-decoration:underline}
   #verinfo{position:fixed;right:14px;bottom:14px;text-align:right;color:#8b857a;font-size:11.5px;
     cursor:pointer;user-select:none;z-index:10;transform:translateZ(0)}
   #verinfo .log{display:none;margin-top:4px;padding:8px 10px;background:rgba(250,250,250,.95);
@@ -128,7 +141,8 @@
   <label>切片<input type="range" id="sl-slice" min="0" max="270" value="270" step="0.5">
     <button id="sl-down" title="下移一层(0.5mm)" style="padding:2px 8px;font-size:13px">−</button>
     <button id="sl-up" title="上移一层(0.5mm)" style="padding:2px 8px;font-size:13px">＋</button></label>
-  <button id="rebuild" style="margin-left:8px">重建</button>
+  <button id="undo" title="撤销上一步移动/添加/删除" style="margin-left:8px">撤销</button>
+  <button id="rebuild" style="margin-left:-6px">重建</button>
   <button id="stl" style="margin-left:-6px">导出 STL</button>
 </div>
 <div id="tips">拖拽=<span>旋转</span> · Shift+拖拽=<span>平移</span> · 滚轮=<span>缩放</span> · 右上角立方体=<span>快速视角</span></div>
@@ -138,6 +152,14 @@
   <button id="fitBtn" title="最佳窗口缩放" aria-label="最佳窗口缩放">⛶</button>
 </div>
 <button id="sideTab" title="展开/收回侧边栏">‹</button>
+<div id="movebar" hidden>
+  <span class="mvlabel" id="movelabel"></span>
+  <button data-plane="xz" class="axisOn" title="在 XZ 水平面内移动">XZ</button>
+  <button data-plane="xy" title="在 XY 立面内移动">XY</button>
+  <button data-plane="yz" title="在 YZ 立面内移动">YZ</button>
+  <span class="hint">左键拖拽移动 · 右键/Esc 取消</span>
+  <button id="moveexit" style="padding:2px 10px;font-size:12px">退出</button>
+</div>
 <div id="verinfo" title="点击展开更新日志"><span id="vertxt">Lyre 3D JS</span><div class="log" id="verlog"></div></div>
 <script type="module">
 import * as THREE from "three";
@@ -233,9 +255,29 @@ function applyCam(){
 }
 let mode=null,px=0,py=0;
 const viewEl=renderer.domElement;
-viewEl.addEventListener("pointerdown",e=>{ mode=e.shiftKey?"pan":"rot"; px=e.clientX; py=e.clientY; viewEl.classList.add("dragging"); viewEl.setPointerCapture(e.pointerId); });
+viewEl.addEventListener("pointerdown",e=>{
+  if(moveCtx&&e.button===0&&!e.shiftKey){                 // 移动模式：仅左键拖拽（右键=取消）
+    mode="move";
+    moveDrag={x:e.clientX,y:e.clientY,
+      orig:moveCtx.items.flatMap(it=>it.meshes.map(m=>({m,from:m.position.clone()})))};
+    viewEl.classList.add("dragging"); viewEl.setPointerCapture(e.pointerId); return;
+  }
+  mode=e.shiftKey?"pan":"rot"; px=e.clientX; py=e.clientY; viewEl.classList.add("dragging"); viewEl.setPointerCapture(e.pointerId); });
 viewEl.addEventListener("pointermove",e=>{
   const dx=e.clientX-px, dy=e.clientY-py;
+  if(mode==="move"){
+    const sp=2*dist*Math.tan(camera.fov*Math.PI/360)/innerHeight;   // 每像素世界长度
+    const dx=(e.clientX-moveDrag.x)*sp, dy=-(e.clientY-moveDrag.y)*sp;
+    const R=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0); // 相机右/上方向
+    const U=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    const v=R.multiplyScalar(dx).add(U.multiplyScalar(dy));           // 屏幕位移→世界位移
+    const pair={xy:["x","y"],xz:["x","z"],yz:["y","z"]}[moveCtx.plane];
+    const a1=new THREE.Vector3(); a1[pair[0]]=1;
+    const a2=new THREE.Vector3(); a2[pair[1]]=1;
+    const d1=a1.multiplyScalar(v.dot(a1)), d2=a2.multiplyScalar(v.dot(a2));
+    moveDrag.orig.forEach(o=>{ o.m.position.copy(o.from).add(d1).add(d2); });
+    return;
+  }
   if(mode==="rot"){ yaw-=dx*.006; pitch+=dy*.006; applyCam(); }
   else if(mode==="pan"){
     const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
@@ -245,7 +287,13 @@ viewEl.addEventListener("pointermove",e=>{
   }
   px=e.clientX; py=e.clientY;
 });
-addEventListener("pointerup",()=>{mode=null;viewEl.classList.remove("dragging");});
+addEventListener("pointerup",()=>{
+  if(mode==="move"&&moveDrag&&moveCtx){
+    const moves=moveDrag.orig.map(o=>({m:o.m,from:o.from.clone(),to:o.m.position.clone()}))
+      .filter(x=>x.from.distanceToSquared(x.to)>1e-6);
+    if(moves.length) pushUndo({type:"move",moves});
+  }
+  mode=null; viewEl.classList.remove("dragging"); });
 viewEl.addEventListener("wheel",e=>{e.preventDefault();dist*=Math.pow(1.0011,e.deltaY);dist=Math.max(120,Math.min(2500,dist));applyCam();},{passive:false});
 
 /* ================= H5 移植：导航立方体 ================= */
@@ -513,7 +561,7 @@ async function buildLyre(){
   f.meshes=meshes; f.solids=solids; f.info=parts.join("\n");
 }
 
-async function buildGeneric(f){
+async function buildGeneric(f,name){
   const model=parseModel(f.text);
   const list=await buildParts(model.parts||[]);
   const meshes=[], solids=[];
@@ -522,7 +570,7 @@ async function buildGeneric(f){
       roughness:.6,metalness:.15,side:THREE.DoubleSide});
     const mesh=setMesh(it.mesh,mat);
     mesh.visible=visState(f.name,it.name);
-    mesh.userData={manifold:it.body, fileName:f.name, partName:it.name};
+    mesh.userData={manifold:it.body, fileName:name, partName:it.name};
     scene.add(mesh); meshes.push(mesh); solids.push({name:it.name,m:it.body});
   }
   f.meshes=meshes; f.solids=solids; f.info="零件×"+meshes.length;
@@ -531,7 +579,7 @@ async function buildGeneric(f){
 async function buildAll(){
   for(const [,f] of files) for(const m of (f.meshes||[])){scene.remove(m);m.geometry.dispose();f.meshes=[];}
   if(files.has("lyre.model.json")) await buildLyre();
-  for(const [name,f] of files) if(name!=="lyre.model.json") await buildGeneric(f);
+  for(const [name,f] of files) if(name!=="lyre.model.json") await buildGeneric(f,name);
   const checks=[];
   for(const [name,f] of files){
     let sl=f.solids||[];
@@ -571,6 +619,13 @@ async function buildAll(){
     for(const m of o.f.meshes) m.position.x+=dx;
     cur+=widths[i]+gap;
   });
+  /* 恢复手动移动偏移 */
+  for(const [k,off] of moveOffMap){
+    const fi=k.indexOf("::"); if(fi<0) continue;
+    const fn=k.slice(0,fi), pn=k.slice(fi+2);
+    const ff=files.get(fn); if(!ff) continue;
+    for(const m of (ff.meshes||[])) if(pn==="#all"||m.userData.partName===pn) m.position.x+=off;
+  }
   const ly=files.get("lyre.model.json");
   solidManifolds=ly?(ly.solids||[]).map(x=>x.m):[];
   solidTarget=solidManifolds.reduce((a,m)=>a?a.add(m):m,null);
@@ -578,10 +633,72 @@ async function buildAll(){
   return checks;
 }
 
+/* ---------- 移动模式：点模型标题/零件进入，X/Y/Z 选轴，左键拖拽，右键/Esc 取消 ---------- */
+const moveOffMap=new Map();                              // 移动偏移（重建后保持）
+let refGrid=null;                                        // 移动平面的参考网格
+function refreshRefGrid(){
+  if(refGrid){scene.remove(refGrid);refGrid.geometry.dispose();refGrid.material.dispose();refGrid=null;}
+  if(!moveCtx) return;
+  refGrid=new THREE.GridHelper(400,20,0x8a7d63,0xb9b0a0);
+  refGrid.material.transparent=true; refGrid.material.opacity=.35;
+  if(moveCtx.plane==="xy") refGrid.rotation.x=Math.PI/2;
+  else if(moveCtx.plane==="yz") refGrid.rotation.z=Math.PI/2;
+  const b=new THREE.Box3();
+  moveCtx.items.forEach(it=>it.meshes.forEach(m=>b.expandByObject(m)));
+  const c=b.getCenter(new THREE.Vector3());
+  if(moveCtx.plane==="xy") refGrid.position.copy(c);
+  else refGrid.position.set(c.x,0,c.z);
+  scene.add(refGrid);
+}
+function setSelHighlight(on){
+  if(!moveCtx) return;
+  moveCtx.items.forEach(it=>it.meshes.forEach(m=>setEmi(m,on)));
+}
+function markSelRows(){
+  const keys=moveCtx?moveCtx.items.map(it=>it.key):[];
+  document.querySelectorAll("#comps .comprow").forEach(r=>
+    r.classList.toggle("selRow",keys.includes(r.dataset.key)));
+}
+const undoStack=[];                                      // 撤销栈：{type:"move"|"text",...}
+function pushUndo(u){ undoStack.push(u); if(undoStack.length>100) undoStack.shift(); }
+let moveCtx=null, moveDrag=null;                         // moveCtx:{items:[{key,meshes,snap}],plane}
+function enterMove(meshes,label,key){
+  if(!moveCtx) moveCtx={items:[],plane:"xz",undoBase:undoStack.length};
+  if(moveCtx.items.some(it=>it.key===key)) return;       // 已在选集中
+  moveCtx.items.push({key,meshes,label,snap:meshes.map(m=>m.position.clone())});
+  $("movelabel").textContent="移动("+moveCtx.items.length+")："+
+    moveCtx.items.map(it=>it.label).join(" + ");
+  $("movebar").hidden=false; setPlane(moveCtx.plane);
+  setSelHighlight(true); markSelRows(); refreshRefGrid();
+}
+function exitMove(cancel){
+  if(!moveCtx) return;
+  if(cancel){
+    moveCtx.items.forEach(it=>it.meshes.forEach((m,i)=>m.position.copy(it.snap[i])));
+    undoStack.length=moveCtx.undoBase;                   // 取消时回滚本次撤销记录
+  }
+  setSelHighlight(false);
+  if(refGrid){scene.remove(refGrid);refGrid.geometry.dispose();refGrid.material.dispose();refGrid=null;}
+  moveCtx=null; moveDrag=null; mode=null;                // ★ 清掉残留的 move 拖拽状态
+  $("movebar").hidden=true; markSelRows();
+}
+function setPlane(p){
+  if(!moveCtx) return; moveCtx.plane=p;                  // 移动方式唯一：一次只选一个面
+  refreshRefGrid();
+  [...$("movebar").querySelectorAll("button[data-plane]")]
+    .forEach(b=>b.classList.toggle("axisOn",b.dataset.plane===p));
+}
+$("movebar").querySelectorAll("button[data-plane]")
+  .forEach(b=>b.onclick=()=>setPlane(b.dataset.plane));
+$("moveexit").onclick=()=>exitMove(false);
+addEventListener("keydown",e=>{ if(e.key==="Escape") exitMove(true); });
+addEventListener("contextmenu",e=>{ if(moveCtx){ e.preventDefault(); exitMove(true); } });
+
 /* ---------- 侧边栏：按文件分组的组件清单（可勾选/删除/添加）---------- */
 function setEmi(mesh,on){ if(mesh&&mesh.material.emissive) mesh.material.emissive.setHex(on?0x9a5a10:0x000000); }
-function compRow(parent,label,checked,onChg,onHover,onLeave,delFn){
+function compRow(parent,label,checked,onChg,onHover,onLeave,delFn,key){
   const row=document.createElement("div"); row.className="comprow";
+  row.dataset.key=key||"";
   const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=checked;
   cb.onchange=onChg;
   const sp=document.createElement("span"); sp.textContent=label;
@@ -597,20 +714,31 @@ function renderSidebar(){
     const det=document.createElement("details");
     det.open=openMap.get(name)!==false;                // 记住用户的开合状态
     if(name===activeFile) det.className="sumactive";
-    const sum=document.createElement("summary"); sum.textContent=name;
-    sum.title="点击：折叠/展开该文件组件（同时设为 JSON 面板编辑目标）";
-    sum.onclick=()=>{
-      openMap.set(name,!(openMap.get(name)!==false));  // 先翻转状态
-      activeFile=name; files.get(activeFile).text=f.text; ptext.value=f.text; pdirty.textContent="";
-      renderSidebar();                                 // 再按新状态重绘
-    };
+    const sum=document.createElement("summary");
+    const caret=document.createElement("span"); caret.className="caret";
+    caret.textContent=openMap.get(name)===false?"▸":"▾";
+    caret.title="折叠/展开";
+    caret.onclick=(e)=>{ e.stopPropagation();
+      openMap.set(name,!(openMap.get(name)!==false));
+      renderSidebar(); };
+    const nt=document.createElement("span"); nt.textContent=name;
+    nt.title="点击：进入移动模式（整组），并设为 JSON 面板编辑目标";
+    sum.appendChild(caret); sum.appendChild(nt);
+    sum.onclick=()=>{ activeFile=name; files.get(activeFile).text=f.text;
+      ptext.value=f.text; pdirty.textContent="";
+      enterMove(f.meshes||[], name, name+"::#all"); };
     det.appendChild(sum);
     if(name==="lyre.model.json"){
       for(const c of LYRE_COMPS){
         compRow(det,c.label,comp[c.key],
           e=>{ comp[c.key]=e.target.checked; refresh(); },
           ()=>setEmi(c.key==="pegs"?pegMesh:(c.key==="strings"?stringGroup:current),true),
-          ()=>setEmi(c.key==="pegs"?pegMesh:(c.key==="strings"?stringGroup:current),false));
+          ()=>setEmi(c.key==="pegs"?pegMesh:(c.key==="strings"?stringGroup:current),false),
+          "lyre.model.json::"+c.key);
+        const span=[...det.querySelectorAll(".comprow")].pop().querySelector("span");
+        span.classList.add("mvname"); span.title="点击进入移动模式";
+        const mesh=c.key==="body"?current:(c.key==="pegs"?pegMesh:stringGroup);
+        span.onclick=()=>{ if(mesh) enterMove([mesh],c.label,"lyre.model.json::"+c.key); };
       }
     }else{
       for(const mesh of (f.meshes||[])){
@@ -619,7 +747,11 @@ function renderSidebar(){
           e=>{ mesh.visible=e.target.checked;
                visMap.set(name+"::"+pn,e.target.checked); },
           ()=>setEmi(mesh,true), ()=>setEmi(mesh,false),
-          ()=>deletePart(name,pn));
+          ()=>deletePart(name,pn),
+          name+"::"+pn);
+        const span=[...det.querySelectorAll(".comprow")].pop().querySelector("span");
+        span.classList.add("mvname"); span.title="点击进入移动模式";
+        span.onclick=()=>enterMove([mesh],pn,name+"::"+pn);
       }
       const add=document.createElement("button"); add.className="addbtn"; add.textContent="＋ 添加零件";
       add.onclick=()=>addPart(name);
@@ -630,8 +762,10 @@ function renderSidebar(){
 }
 function deletePart(fileName,partName){
   const f=files.get(fileName); const model=parseModel(f.text);
+  const before=f.text;
   model.parts=model.parts.filter(p=>p.name!==partName);
   f.text=JSON.stringify(model,null,2);
+  pushUndo({type:"text",file:fileName,before,after:f.text});
   if(activeFile===fileName){ ptext.value=f.text; files.get(activeFile).text=f.text; }
   refresh();
 }
@@ -640,7 +774,9 @@ function addPart(fileName){
   model.parts=model.parts||[];
   const i=model.parts.length+1;
   model.parts.push({name:"零件"+i,type:"box",p:{sx:20,sy:20,sz:20},at:[0,0,10],color:"#c8b88a"});
+  const before=f.text;
   f.text=JSON.stringify(model,null,2);
+  pushUndo({type:"text",file:fileName,before,after:f.text});
   if(activeFile===fileName){ ptext.value=f.text; files.get(activeFile).text=f.text; }
   refresh();
 }
@@ -665,6 +801,20 @@ async function refresh(){
     document.getElementById("infobody").textContent=lines.join("\n");
   }catch(e){ errBox.textContent="❌ "+(e.stack||e.message); }
 }
+document.getElementById("undo").onclick=()=>{
+  const u=undoStack.pop();
+  if(!u){ hud.textContent="没有可撤销的操作"; return; }
+  if(u.type==="move"){
+    u.moves.forEach(x=>{ if(x.m.parent) x.m.position.copy(x.from); });
+    hud.textContent="↩ 已撤销移动";
+  }else if(u.type==="text"){
+    const f=files.get(u.file); if(!f) return;
+    f.text=u.before;
+    if(activeFile===u.file){ ptext.value=f.text; files.get(activeFile).text=f.text; }
+    refresh();
+    hud.textContent="↩ 已撤销："+u.file+" 零件变更";
+  }
+};
 document.getElementById("rebuild").onclick=refresh;
 
 /* 悬停联动已内建于 renderSidebar 的组件行 */
@@ -682,8 +832,8 @@ function applyView(){
   if(stringGroup) stringGroup.position.z = 170*(1-asm);  // 琴弦解体上浮更多
   const on=h<269.5;
   clipPlane.constant=h;
-  for(const o of [current,pegMesh,stringGroup])
-    if(o) o.material.clippingPlanes=on?[clipPlane]:null; // 只剖模型，不剖热床
+  for(const [,f] of files) for(const m of (f.meshes||[]))
+    m.material.clippingPlanes=on?[clipPlane]:null;       // 只剖模型，不剖热床
   cutVis.position.z=h; cutVis.visible=on;
 }
 async function refreshInfill(){                          // 模拟切片：±45° 正交填充
