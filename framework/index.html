@@ -86,9 +86,10 @@
   .comprow .mvname:hover{text-decoration:underline}
   #verinfo{position:fixed;right:14px;bottom:14px;text-align:right;color:#8b857a;font-size:11.5px;
     cursor:pointer;user-select:none;z-index:10;transform:translateZ(0)}
-  #verinfo .log{display:none;margin-top:4px;padding:8px 10px;background:rgba(250,250,250,.95);
+  #verinfo .log{display:none;position:fixed;right:14px;bottom:40px;width:460px;max-width:calc(100vw - 280px);
+    max-height:70vh;overflow-y:auto;padding:10px 12px;background:rgba(250,250,250,.97);
     border:1px solid rgba(90,85,78,.35);border-radius:8px;text-align:left;color:#55504a;
-    white-space:pre-line;max-width:340px}
+    font-size:12px;line-height:1.6;z-index:20;transform:translateZ(0);box-sizing:border-box}
   #verinfo.open .log{display:block}
   #sidebar #panel{margin:0}
   #sideTab{position:fixed;left:244px;top:50%;transform:translateY(-50%);z-index:6;
