@@ -960,19 +960,30 @@ window.__view = { get camera(){return camera;}, get scene(){return scene;}, get 
     }catch(e){}
     await refresh();
   }catch(e){ errBox.textContent="启动失败："+(e.stack||e.message); }
+  let verData=null;
   try{
-    const v=await (await fetch("/version")).json();
-    document.getElementById("vertxt").textContent="Lyre 3D JS · git "+v.version;
-    document.getElementById("verlog").textContent=[
-      "git "+v.version,
-      "多文件加载：models/ 目录按文件分组，组件可勾选/增删",
-      "通用零件：box / cyl / sphere / tube / gear",
-      "自动布尔检查矩阵 + 模拟切片±45°填充",
-      "模型JSON全字段中文注释(JSONC) + 悬停高亮",
-      "真实阴影 / 共振腔 / 调音柱 / 琴弦走线"
-    ].join("\n");
+    verData=await (await fetch("/version")).json();
+    document.getElementById("vertxt").textContent="Lyre 3D JS · git "+verData.version;
   }catch(e){}
-  document.getElementById("verinfo").onclick=()=>document.getElementById("verinfo").classList.toggle("open");
+  document.getElementById("verinfo").onclick=()=>{
+    document.getElementById("verinfo").classList.toggle("open");
+    if(!document.getElementById("verinfo").classList.contains("open")) return;
+    const log=(verData&&verData.log)||[];
+    const esc=x=>x.replace(/</g,"&lt;");
+    const rows=log.map(v=>'<div class="vrow"><b>'+v.hash+'</b><span class="d">'+v.date+'</span>'+esc(v.msg)+'</div>').join("");
+    document.getElementById("verlog").innerHTML=
+      '<h4>Lyre 3D JS · 浏览器端参数化建模框架</h4>'+
+'为复刻里拉竖琴（32.5cm 实物 → 3D 打印）而生：参数即 JSON、几何即代码、结果即水密 STL。'+
+      '纯 AI 可驱动，人也可直接照注释改参数。'+
+      '<h4>与传统 CAD（FreeCAD / SolidWorks / UG 等）的区别</h4>'+
+      '· 无草图约束求解器——"约束"由单一数据源(JSON)+内核推导顺序承担，改参数毫秒级重算，不存在求解器跳解'+
+      '<br>· 网格内核 Manifold 永久水密，省去"检查实体有效性"；输出面向 3D 打印(STL)，不输出 STEP'+
+      '<br>· 无交互式建模 UI，参数与组件树即全部接口——这正是 AI 驱动最高效的形态'+
+      '<h4>与 OpenSCAD 等代码建模工具的区别</h4>'+
+      '· 运行在浏览器、实时 3D 预览与热床场景；组件树可勾选显隐/增删/移动'+
+      '<br>· 内置布尔干涉检查、±45°填充切片模拟、装配解体动画等打印向工具'+
+      '<hr><h4>版本历史（新 → 旧，共 '+log.length+' 条）</h4>'+rows;
+  };
 })();
 requestAnimationFrame(frame);
 </script>

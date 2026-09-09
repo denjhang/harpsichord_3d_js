@@ -22,14 +22,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if urllib.parse.urlparse(self.path).path == "/version":
+            import json as _json
             try:
                 h = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
                                             cwd=HERE).decode().strip()
             except Exception:
                 h = "unknown"
-            body = ('{"version":"%s"}' % h).encode()
+            log = []
+            try:
+                out = subprocess.check_output(
+                    ["git", "log", "--pretty=format:%h|%ad|%s", "--date=short", "-60"],
+                    cwd=HERE).decode().strip()
+                for line in out.split("\n"):
+                    p = line.split("|", 2)
+                    if len(p) == 3:
+                        log.append({"hash": p[0], "date": p[1], "msg": p[2]})
+            except Exception:
+                pass
+            body = _json.dumps({"version": h, "log": log},
+                               ensure_ascii=False).encode("utf-8")
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
