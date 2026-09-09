@@ -73,6 +73,7 @@
     border:1px dashed #a89f90;border-radius:6px;color:#4a453e;cursor:pointer}
   .addbtn:hover{background:#e5e0d4}
   details.sumactive summary{font-weight:bold;color:#1a1712}
+  #movebar[hidden]{display:none}
   #movebar{position:fixed;top:14px;left:calc(50% + 122px);z-index:10;
     transform:translateX(-50%) translateZ(0);display:flex;align-items:center;gap:8px;
     background:rgba(250,250,250,.95);border:1px solid #a89f90;border-radius:8px;padding:6px 12px}
@@ -626,6 +627,16 @@ async function buildAll(){
     const ff=files.get(fn); if(!ff) continue;
     for(const m of (ff.meshes||[])) if(pn==="#all"||m.userData.partName===pn) m.position.x+=off;
   }
+  /* 关键：网格平移后，实体流形同步平移（否则切片填充残留在旧位置） */
+  solidManifolds=[];
+  for(const [,f] of files) for(const x of (f.solids||[])){
+    const mesh=(f.meshes||[]).find(m=>m.userData.manifold===x.m);
+    if(!mesh) continue;
+    const p=mesh.position;
+    if(p.x||p.y||p.z) x.m=x.m.translate([p.x,p.y,p.z]);
+    if(mesh.visible) solidManifolds.push(x.m);          // 隐藏件不参与切片
+  }
+  solidTarget=solidManifolds.reduce((a,m)=>a?a.add(m):m,null);
   const ly=files.get("lyre.model.json");
   solidManifolds=ly?(ly.solids||[]).map(x=>x.m):[];
   solidTarget=solidManifolds.reduce((a,m)=>a?a.add(m):m,null);
@@ -679,7 +690,8 @@ function exitMove(cancel){
   }
   setSelHighlight(false);
   if(refGrid){scene.remove(refGrid);refGrid.geometry.dispose();refGrid.material.dispose();refGrid=null;}
-  moveCtx=null; moveDrag=null; mode=null;                // ★ 清掉残留的 move 拖拽状态
+  moveCtx=null; moveDrag=null; mode=null;                // 清掉残留的 move 拖拽状态
+  $("movelabel").textContent="";
   $("movebar").hidden=true; markSelRows();
 }
 function setPlane(p){
