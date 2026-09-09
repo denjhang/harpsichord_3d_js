@@ -458,7 +458,8 @@ let solidManifolds=[], solidTarget=null;
 let modelText=null;                                      // JSON 面板正在编辑的文本
 let activeFile="lyre.model.json";                        // 面板正在编辑/保存的文件
 const files=new Map();                                   // name -> {text, meshes:[], solids:[], info}
-const visMap=new Map();                                  // "file::零件" -> 是否可见
+const visMap=new Map();                                  // 组件显隐状态
+const openMap=new Map();                                 // 文件分组折叠状态                                  // "file::零件" -> 是否可见
 const parseModel=t=>JSON.parse(t.split("\n")
   .map(l=>{const k=l.indexOf("//");return k<0?l:l.slice(0,k);})
   .join("\n"));
@@ -591,12 +592,16 @@ function compRow(parent,label,checked,onChg,onHover,onLeave,delFn){
 function renderSidebar(){
   const host=document.getElementById("comps"); host.innerHTML="";
   for(const [name,f] of files){
-    const det=document.createElement("details"); det.open=true;
+    const det=document.createElement("details");
+    det.open=openMap.get(name)!==false;                // 记住用户的开合状态
     if(name===activeFile) det.className="sumactive";
     const sum=document.createElement("summary"); sum.textContent=name;
-    sum.title="点击：在下方 JSON 面板编辑该文件";
-    sum.onclick=()=>{ activeFile=name; files.get(activeFile).text=f.text; ptext.value=f.text; pdirty.textContent="";
-      renderSidebar(); };
+    sum.title="点击：折叠/展开该文件组件（同时设为 JSON 面板编辑目标）";
+    sum.onclick=()=>{
+      openMap.set(name,!(openMap.get(name)!==false));  // 先翻转状态
+      activeFile=name; files.get(activeFile).text=f.text; ptext.value=f.text; pdirty.textContent="";
+      renderSidebar();                                 // 再按新状态重绘
+    };
     det.appendChild(sum);
     if(name==="lyre.model.json"){
       for(const c of LYRE_COMPS){
